@@ -1,0 +1,70 @@
+{{- /*
+Feishu directory sync, every ten minutes. concurrencyPolicy Forbid replaces
+the flock a VM cron needs. Alert on kube_cronjob_status_last_successful_time
+older than 30 minutes; a failed run alone is not noticed by anyone.
+*/ -}}
+{{- if .Values.feishuSync.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: feishu-sync
+  labels:
+    app.kubernetes.io/name: feishu-sync
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  schedule: {{ .Values.feishuSync.schedule | quote }}
+  timeZone: Asia/Shanghai
+  # Two runs writing at once could overwrite each other's group members.
+  concurrencyPolicy: Forbid
+  # A run missed by more than this is skipped; the next one catches up.
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      # Not retried: the next run is ten minutes away, and the script exits
+      # before writing when Feishu errors.
+      backoffLimit: 0
+      # Ends a hung run before the next one is due.
+      activeDeadlineSeconds: 540
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: feishu-sync
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/version: {{ required "feishuSync.image.tag is set by the pipeline" .Values.feishuSync.image.tag | quote }}
+            {{- toYaml .Values.podLabels | nindent 12 }}
+          annotations:
+            {{- toYaml .Values.podAnnotations | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: aliyun-image-secret
+          containers:
+            - name: feishu-sync
+              image: {{ .Values.registry }}/iam-passport-feishu-sync:{{ .Values.feishuSync.image.tag }}
+              imagePullPolicy: IfNotPresent
+              {{- if .Values.feishuSync.dryRun }}
+              args: ["--dry-run"]
+              {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # In-cluster, so the token never crosses the ALB.
+                - name: AK_URL
+                  value: http://authentik-server.{{ .Release.Namespace }}.svc
+                # Without it Python buffers stdout and a killed run loses its log.
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              envFrom:
+                - secretRef:
+                    name: iam-passport-feishu-sync
+              resources:
+                {{- toYaml .Values.feishuSync.resources | nindent 16 }}
+{{- end }}
