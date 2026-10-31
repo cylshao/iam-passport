@@ -1,0 +1,24 @@
+# The prod profile: namespace iam-passport-prod. Layered over values.yaml.
+
+# enabled once the iam-passport-feishu-sync Secret exists; dryRun false once
+# a dry run's output has been reviewed (docs/deploy-acs.md 5).
+feishuSync:
+  enabled: false
+  dryRun: true
+
+authentik:
+  server:
+    env: &env
+      - name: AUTHENTIK_WEB__BASE_URL
+        value: https://TODO-auth.company.com
+      - name: AUTHENTIK_POSTGRESQL__HOST
+        value: TODO-prod.pg.rds.aliyuncs.com
+    ingress:
+      hosts:
+        - TODO-auth.company.com
+      tls:
+        - hosts:
+            - TODO-auth.company.com
+  worker:
+    replicas: 2
+    env: *env
