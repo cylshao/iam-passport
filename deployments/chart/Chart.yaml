@@ -1,0 +1,17 @@
+# Everything iam-passport runs in a profile's namespace, released as one unit:
+# authentik (the official chart, vendored under charts/), the Feishu sync
+# CronJob and the blueprints. `helm rollback` therefore rolls all of them.
+#
+# The authentik dependency version is the authentik release, and the only
+# place it is written: the chart defaults its image tag to it, and the Makefile
+# reads it for `make mirror` and the local compose stacks. To upgrade, change
+# it, then `make chart` to re-vendor and `make mirror` to copy the images.
+apiVersion: v2
+name: iam-passport
+description: authentik with the Feishu directory sync
+type: application
+version: 0.1.0
+dependencies:
+  - name: authentik
+    version: 2026.8.5
+    repository: https://charts.goauthentik.io
