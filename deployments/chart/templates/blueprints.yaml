@@ -1,0 +1,15 @@
+{{- /*
+Every file under blueprints/, mounted into the worker by the authentik chart
+(authentik.blueprints.configMaps). The worker applies them at start and when
+they change.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iam-passport-blueprints
+  labels:
+    app.kubernetes.io/name: blueprints
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  {{- (.Files.Glob "blueprints/*.yaml").AsConfig | nindent 2 }}
