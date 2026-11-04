@@ -1,0 +1,18 @@
+# authentik LDAP outpost，手动部署。
+# 基于官方文档 https://docs.goauthentik.io/add-secure-apps/outposts/manual-deploy-docker-compose/
+# 与官方的差异：端口只绑定到指定的内网地址；默认只开放 LDAPS（636），不开放明文 389。
+#
+# 前置步骤和 JumpServer 的接入配置见 docs/authentik.md 7.4 节。
+services:
+  ldap:
+    image: ${AUTHENTIK_LDAP_IMAGE:-ghcr.io/goauthentik/ldap}:${AUTHENTIK_TAG:?run make ldap-up from the repository root}
+    environment:
+      AUTHENTIK_HOST: ${AUTHENTIK_HOST:?AUTHENTIK_HOST required}
+      AUTHENTIK_INSECURE: ${AUTHENTIK_INSECURE:-false}
+      AUTHENTIK_TOKEN: ${AUTHENTIK_TOKEN:?AUTHENTIK_TOKEN required}
+    ports:
+      # LDAPS 需要在 LDAP provider 里选择证书，否则 636 端口无法建立 TLS 连接
+      - ${LDAP_BIND_IP:-127.0.0.1}:636:6636
+      # 明文 LDAP 只用于本地验证，生产环境不要开放
+      # - ${LDAP_BIND_IP:-127.0.0.1}:389:3389
+    restart: unless-stopped

@@ -1,0 +1,183 @@
+# Settings shared by every profile; prod is the only one. values-<profile>.yaml
+# holds what differs, and a value starting with TODO there fails the pipeline
+# before it deploys.
+#
+# Secrets are never in these files. Each namespace has two Secrets created by
+# hand (docs/deploy-acs.md 3.5):
+#   iam-passport-authentik    AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__PASSWORD
+#   iam-passport-feishu-sync  FEISHU_APP_ID, FEISHU_APP_SECRET, AK_TOKEN
+
+# ACR, reached over the cluster's VPC; the region must be the cluster's. `make
+# mirror` copies the upstream images here, since the cluster may not reach
+# ghcr.io. The same prefix appears in authentik.global below.
+registry: iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam
+
+feishuSync:
+  # Off until authentik is up and its API token exists (docs/deploy-acs.md 5).
+  enabled: false
+  schedule: "*/10 * * * *"
+  # True until a dry run's output has been reviewed (docs/lark.md 5.3).
+  dryRun: true
+  # Set by the pipeline to the image it just built.
+  image:
+    tag: ""
+  resources:
+    requests: { cpu: "0.5", memory: 1Gi }
+    limits: { cpu: "0.5", memory: 1Gi }
+
+# Pod labels and annotations for every pod this chart creates. Outposts that
+# authentik deploys itself get theirs through the outpost's
+# kubernetes_json_patches (docs/deploy-acs.md 6).
+podLabels:
+  alibabacloud.com/acs: "true"
+  alibabacloud.com/compute-class: general-purpose
+podAnnotations:
+  alibabacloud.com/custom-tags: "Project:iam-passport,Platform:infra"
+
+# The official chart (https://github.com/goauthentik/helm). Keys below are its
+# values, nested under the dependency's name.
+authentik:
+  # Short names: the namespace is dedicated to this release.
+  fullnameOverride: authentik
+
+  global:
+    image:
+      # No tag: it defaults to the chart's appVersion, the version Chart.yaml
+      # pins.
+      repository: iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam/authentik-server
+    imagePullSecrets:
+      - name: aliyun-image-secret
+    addPrometheusAnnotations: true
+    podLabels:
+      alibabacloud.com/acs: "true"
+      alibabacloud.com/compute-class: general-purpose
+    podAnnotations:
+      alibabacloud.com/custom-tags: "Project:iam-passport,Platform:infra"
+    # With authentik.existingSecret set the chart renders none of the
+    # authentik.* settings, so every non-secret setting goes here. Profiles
+    # append theirs through server.env and worker.env, since Helm replaces
+    # lists rather than merging them.
+    env:
+      - name: AUTHENTIK_POSTGRESQL__NAME
+        value: authentik
+      - name: AUTHENTIK_POSTGRESQL__USER
+        value: authentik
+      - name: AUTHENTIK_ERROR_REPORTING__ENABLED
+        value: "false"
+      # Outposts authentik deploys pull from the same mirror.
+      - name: AUTHENTIK_OUTPOSTS__CONTAINER_IMAGE_BASE
+        value: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam/authentik-%(type)s:%(version)s"
+      # Feishu Mail over implicit TLS (docs/deploy-acs.md 3.8). The password,
+      # a third-party client password rather than the login one, is
+      # AUTHENTIK_EMAIL__PASSWORD in the iam-passport-authentik Secret.
+      - name: AUTHENTIK_EMAIL__HOST
+        value: smtp.feishu.cn
+      - name: AUTHENTIK_EMAIL__PORT
+        value: "465"
+      - name: AUTHENTIK_EMAIL__USE_SSL
+        value: "true"
+      - name: AUTHENTIK_EMAIL__USE_TLS
+        value: "false"
+      - name: AUTHENTIK_EMAIL__USERNAME
+        value: TODO-noreply@company.com
+      # Must be the mailbox above; Feishu rejects other senders.
+      - name: AUTHENTIK_EMAIL__FROM
+        value: "统一登录 <TODO-noreply@company.com>"
+      - name: AUTHENTIK_EMAIL__TIMEOUT
+        value: "10"
+      # The private ranges authentik trusts by default, repeated because
+      # setting the list replaces them; add the ALB's range if it falls outside.
+      - name: AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS
+        value: "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+  authentik:
+    existingSecret:
+      secretName: iam-passport-authentik
+
+  # Mounted into the worker, which applies every file at start and on change.
+  blueprints:
+    configMaps:
+      - iam-passport-blueprints
+
+  server:
+    replicas: 2
+    # Every login in the company goes through these pods.
+    deploymentStrategy:
+      type: RollingUpdate
+      rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+    pdb:
+      enabled: true
+      maxUnavailable: 1
+    # No Kubernetes API access; only the worker manages outposts. The chart
+    # renders automountServiceAccountToken only when an account is named.
+    serviceAccountName: default
+    automountServiceAccountToken: false
+    # The database is an external FQDN; ndots:5 makes each connection pay a run
+    # of failed lookups first.
+    dnsConfig:
+      options:
+        - name: ndots
+          value: "2"
+    # Gives the ALB time to deregister the pod before it stops accepting.
+    lifecycle:
+      preStop:
+        exec:
+          command: ["sh", "-c", "sleep 15"]
+    terminationGracePeriodSeconds: 45
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities: { drop: ["ALL"] }
+    resources:
+      requests: { cpu: "2", memory: 4Gi }
+      limits: { cpu: "2", memory: 4Gi }
+    # A metrics Service on 9300; global.addPrometheusAnnotations marks it for
+    # scraping.
+    metrics:
+      enabled: true
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: authentik
+            app.kubernetes.io/component: server
+    # Registered by the ALB Ingress controller, which adds pod IPs to the
+    # server group directly. The AlbConfig (an internal ALB) is created once
+    # per cluster by its administrator.
+    ingress:
+      enabled: true
+      ingressClassName: alb
+      annotations:
+        alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+        alb.ingress.kubernetes.io/healthcheck-enabled: "true"
+        alb.ingress.kubernetes.io/healthcheck-path: /-/health/ready/
+      # The profile sets the host, in hosts and tls; tls without a secretName
+      # lets the controller find the certificate for the host in Aliyun's
+      # certificate service.
+      hosts: []
+      tls: []
+
+  worker:
+    replicas: 1
+    pdb:
+      enabled: true
+      maxUnavailable: 1
+    dnsConfig:
+      options:
+        - name: ndots
+          value: "2"
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities: { drop: ["ALL"] }
+    resources:
+      requests: { cpu: "1", memory: 2Gi }
+      limits: { cpu: "1", memory: 2Gi }
+    metrics:
+      enabled: true
+
+  # The worker's service account, limited by a Role to this namespace, which
+  # lets authentik deploy and upgrade its own outposts (LDAP, RADIUS).
+  serviceAccount:
+    create: true
+    fullnameOverride: authentik

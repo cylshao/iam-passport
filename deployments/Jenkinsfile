@@ -1,0 +1,244 @@
+// Build and deploy pipeline: test the org sync and the chart, package the sync
+// with kaniko, then `helm upgrade` deployments/chart into the profile's
+// namespace. One release per namespace holds everything, so a failed deploy is
+// undone with `helm rollback` (docs/deploy-acs.md 7.3).
+//
+// authentik's own images are not built here. `make mirror` copies them into
+// ACR whenever the authentik version in deployments/chart/Chart.yaml changes,
+// since the VPC may not reach ghcr.io. The chart defaults its image tag to
+// that version, so nothing here sets it.
+//
+// One job per profile, all reading this file from SCM: the job's name, which
+// must contain exactly one profile name, picks the profile. prod is the only
+// one; a new profile needs an entry below, a values-<profile>.yaml and a
+// namespace from deployments/cluster-setup.yaml.
+
+def build_name = 'iam-passport'
+def git_url = 'git@TODO-gitlab-host:TODO-group/iam-passport.git'
+def push_registry = 'iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam'
+
+// A "Secret text" credential holding the Feishu group bot webhook that hears
+// about failed builds. While it is TODO, failures are not announced.
+def feishu_webhook_credential = 'TODO-iam-passport-feishu-webhook'
+
+// Per profile: the namespace deployments/cluster-setup.yaml created, and the
+// Jenkins "Secret file" credential holding a kubeconfig for that namespace's
+// iam-deployer (docs/deploy-acs.md 3.7). Everything else a profile differs in
+// lives in deployments/chart/values-<profile>.yaml. A value containing TODO
+// fails Checkout.
+def profiles = [
+    'prod': [
+        namespace: 'iam-passport-prod',
+        credential: 'TODO-iam-passport-prod-kubeconfig',
+    ],
+]
+
+// Set by Checkout.
+def profile = ''
+def target = [:]
+def build_tag = 'latest'
+def build_revision = 'unknown'
+def sync_image_tag = ''
+def authentik_version = ''
+def helm_args = ''
+def chart_args = ''
+
+pipeline {
+    // The Jenkins environment this runs in: the Kubernetes cloud, the agent
+    // namespace (ops), the workspace PVC and the docker-config ConfigMap all
+    // have to exist under these names (docs/deploy-acs.md 3.1, 3.7).
+    agent {
+      kubernetes {
+        workspaceVolume persistentVolumeClaimWorkspaceVolume(claimName : "jenkins-agent-workspace",readOnly: false)
+        cloud "iam-k8s"
+        yaml """
+  apiVersion: "v1"
+  kind: "Pod"
+  metadata:
+    annotations:
+      k8s.aliyun.com/eci-custom-tags: "Project:iam-passport"
+    labels:
+      jenkins: "slave"
+    namespace: "ops"
+  spec:
+    imagePullSecrets:
+    - name: aliyun-image-secret
+    containers:
+    - command:
+      - cat
+      image: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/public/python:3.13-alpine"
+      name: "python"
+      tty: true
+      resources:
+        limits:
+          cpu: 1
+          memory: 2Gi
+        requests:
+          cpu: 1
+          memory: 2Gi
+    - command:
+      - cat
+      image: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/public/executor:debug"
+      name: "docker"
+      imagePullPolicy: Always
+      tty: true
+      volumeMounts:
+      - mountPath: /kaniko/.docker/config.json
+        subPath: config.json
+        name: docker-config
+    # alpine/helm, mirrored by `make mirror`.
+    - command:
+      - cat
+      image: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/public/helm:3.19.0"
+      name: "helm"
+      imagePullPolicy: IfNotPresent
+      tty: true
+    volumes:
+    - name: docker-config
+      configMap:
+        name: docker-config
+      """
+      }
+    }
+
+    options {
+        // Two concurrent `helm upgrade`s on one release collide.
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '50'))
+    }
+
+    parameters {
+        string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Branch to be built')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    // Exactly one, so a job named for neither or both never
+                    // guesses which environment to roll.
+                    def jobName = env.JOB_NAME.toLowerCase()
+                    def matched = profiles.keySet().toList().findAll { jobName.contains(it) }
+                    if (matched.size() != 1) {
+                        error "job '${env.JOB_NAME}' must name exactly one of ${profiles.keySet()}, found ${matched}"
+                    }
+                    profile = matched[0]
+                    target = profiles[profile]
+                    currentBuild.displayName = "#${env.BUILD_NUMBER} ${profile}"
+
+                    def unset = target.findAll { k, v -> v instanceof String && v.contains('TODO') }.keySet().toList()
+                    if (git_url.contains('TODO')) {
+                        unset += ['git_url']
+                    }
+                    if (unset) {
+                        error "profile '${profile}' still has TODO values: ${unset}"
+                    }
+
+                    sh 'git config --global --add safe.directory "*"'
+                    git url: git_url, branch: "${params.BRANCH_NAME}", credentialsId: 'gitlab-deploy'
+                    build_tag = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    build_revision = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                    // The build number keeps a rerun of the same commit from
+                    // pushing over a tag ACR holds immutable.
+                    sync_image_tag = "${profile}-${build_tag}-${env.BUILD_NUMBER}"
+
+                    // A TODO the values files still carry would be deployed as
+                    // a literal hostname or database. Anchored so comments
+                    // do not trip it.
+                    sh "! grep -n '^[^#]*TODO' deployments/chart/values.yaml deployments/chart/values-${profile}.yaml"
+
+                    authentik_version = sh(returnStdout: true, script: "sed -n '/- name: authentik/,/version:/s/^ *version: *//p' deployments/chart/Chart.yaml").trim()
+                    if (!(authentik_version ==~ /[0-9]{4}\.[0-9]+\.[0-9]+/)) {
+                        error "deployments/chart/Chart.yaml: authentik version '${authentik_version}' is not a release version"
+                    }
+                    currentBuild.description = "${build_tag}, authentik ${authentik_version}"
+
+                    // lint takes chart paths only; template and upgrade take
+                    // the release name first.
+                    chart_args = [
+                        "deployments/chart",
+                        "--namespace ${target.namespace}",
+                        "-f deployments/chart/values.yaml",
+                        "-f deployments/chart/values-${profile}.yaml",
+                        "--set feishuSync.image.tag=${sync_image_tag}",
+                    ].join(' ')
+                    helm_args = "iam-passport ${chart_args}"
+                }
+            }
+        }
+        stage('Test') {
+            steps {
+                container("python") {
+                    // The tests stub requests and need nothing installed.
+                    sh 'python3 org-sync/feishu/test_sync.py'
+                }
+                container("helm") {
+                    // The authentik chart is vendored under charts/, so neither
+                    // needs network.
+                    sh "helm lint ${chart_args}"
+                }
+            }
+        }
+        stage('Build Image & Push Image') {
+            steps {
+                container("docker") {
+                    script {
+                        // The build args become OCI labels; the kaniko image has no git.
+                        def created = sh(returnStdout: true, script: 'date -u +%Y-%m-%dT%H:%M:%SZ').trim()
+                        retry(2) {
+                            sh "executor --cache=false --dockerfile=deployments/feishu-sync.Dockerfile --destination=${push_registry}/${build_name}-feishu-sync:${sync_image_tag} --context=./ --build-arg VERSION=${sync_image_tag} --build-arg REVISION=${build_revision} --build-arg CREATED=${created} --log-format=text --verbosity=info"
+                        }
+                    }
+                }
+            }
+        }
+        stage('Deploy To K8s') {
+            steps {
+                container("helm") {
+                    script {
+                        // Kept with the build, so what was applied can be read
+                        // back without cluster access.
+                        def manifest = "iam-passport-${profile}.rendered.yaml"
+                        sh "helm template ${helm_args} > ${manifest}"
+                        archiveArtifacts artifacts: manifest, fingerprint: true
+
+                        try {
+                            withCredentials([file(credentialsId: target.credential, variable: 'KUBECONFIG')]) {
+                                // No --atomic: authentik migrates its database
+                                // on start and does not support running an
+                                // older release against it. maxUnavailable 0
+                                // keeps the previous pods serving instead.
+                                sh "helm upgrade --install ${helm_args} --wait --timeout 15m --history-max 10"
+                            }
+                        } catch (e) {
+                            println e
+                            error "deploy failed: see `helm -n ${target.namespace} history iam-passport` and docs/deploy-acs.md 7.3"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            script {
+                if (!feishu_webhook_credential.contains('TODO')) {
+                    container('python') {
+                        withCredentials([string(credentialsId: feishu_webhook_credential, variable: 'FEISHU_WEBHOOK')]) {
+                            withEnv(["MESSAGE=${build_name} ${profile} 构建失败（${currentBuild.displayName}）：${env.BUILD_URL}"]) {
+                                // A notification that cannot be sent must not
+                                // mask the failure it reports.
+                                sh '''python3 -c 'import json, os, urllib.request
+body = json.dumps({"msg_type": "text", "content": {"text": os.environ["MESSAGE"]}}).encode()
+req = urllib.request.Request(os.environ["FEISHU_WEBHOOK"], body, {"Content-Type": "application/json"})
+print(urllib.request.urlopen(req, timeout=10).read().decode())' || true'''
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,40 @@
+# Only accounts the Feishu sync created may log in through Feishu
+# (docs/lark.md 3.5). The source links by username, so without this a Feishu
+# user whose email prefix is akadmin would log in as akadmin.
+#
+# A deny stage ahead of the login stage, bound to a policy that passes only for
+# accounts without the feishu_managed attribute; the default flow's own
+# bindings are left untouched.
+version: 1
+metadata:
+  name: iam-passport - Feishu login only for synced accounts
+entries:
+  - model: authentik_policies_expression.expressionpolicy
+    id: policy
+    identifiers:
+      name: feishu-only-managed-users
+    attrs:
+      expression: |
+        user = request.context.get("pending_user")
+        return not (user and user.attributes.get("feishu_managed"))
+  - model: authentik_stages_deny.denystage
+    id: deny
+    identifiers:
+      name: feishu-only-managed-users-deny
+    attrs:
+      deny_message: 该账号不能通过飞书登录，请使用用户名和密码登录。
+  - model: authentik_flows.flowstagebinding
+    id: binding
+    identifiers:
+      target: !Find [authentik_flows.flow, [slug, default-source-authentication]]
+      stage: !KeyOf deny
+    attrs:
+      order: -10
+      evaluate_on_plan: false
+      re_evaluate_policies: true
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf binding
+      policy: !KeyOf policy
+    attrs:
+      order: 0
