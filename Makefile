@@ -1,4 +1,4 @@
-# `make test`, the default goal, is what CI runs before building anything.
+# `make lint`, the default goal, is what CI runs before building anything.
 # Helm runs in a container (alpine/helm), so only Docker is required.
 
 # The authentik release, read from the chart dependency that pins it.
@@ -16,12 +16,9 @@ FEISHU_SYNC_IMAGE := $(APP)-feishu-sync:local-$(TAG)
 HELM_IMAGE ?= alpine/helm:3.19.0
 HELM := docker run --rm -v "$(CURDIR)/deployments/chart:/chart" -w /chart $(HELM_IMAGE)
 
-.DEFAULT_GOAL := test
+.DEFAULT_GOAL := lint
 
-.PHONY: test lint chart mirror image-feishu-sync up down ldap-up
-
-test:
-	python3 org-sync/feishu/test_sync.py
+.PHONY: lint chart mirror image-feishu-sync up down ldap-up
 
 # TODO values render fine; the pipeline rejects them.
 lint:

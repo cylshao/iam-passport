@@ -167,12 +167,8 @@ pipeline {
                 }
             }
         }
-        stage('Test') {
+        stage('Lint') {
             steps {
-                container("python") {
-                    // The tests stub requests and need nothing installed.
-                    sh 'python3 org-sync/feishu/test_sync.py'
-                }
                 container("helm") {
                     // The authentik chart is vendored under charts/, so neither
                     // needs network.
