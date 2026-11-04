@@ -20,12 +20,14 @@ LABEL org.opencontainers.image.title="iam-passport-feishu-sync" \
 WORKDIR /app
 
 # The Aliyun PyPI mirror is reachable from the build VPC; pypi.org may not be.
-COPY org-sync/feishu/requirements.txt .
+COPY org-sync/requirements.txt .
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
-COPY org-sync/feishu/feishu_authentik_sync.py .
+COPY org-sync/common/*.py common/
+COPY org-sync/feishu/__init__.py org-sync/feishu/main.py org-sync/feishu/contacts.py feishu/
 
 USER 65534
 
-# Exec form, so python is PID 1 and receives SIGTERM directly.
-ENTRYPOINT ["python3", "/app/feishu_authentik_sync.py"]
+# Exec form, so python is PID 1 and receives SIGTERM directly. -m puts the
+# working directory on sys.path, which is what resolves `common` and `feishu`.
+ENTRYPOINT ["python3", "-m", "feishu.main"]

@@ -3,4 +3,5 @@ authentik/data/
 authentik/certs/
 authentik/custom-templates/
 __pycache__/
+.venv/
 .idea/
