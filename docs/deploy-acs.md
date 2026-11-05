@@ -8,7 +8,7 @@
 - LDAP、RADIUS 等 outpost 由 authentik **自己在集群里创建和升级**，版本始终和 authentik 一致。
 - Pod 不挂共享存储，全部无状态。
 
-authentik 的安全要求和运维规范见 [authentik.md](authentik.md)，飞书接入见 [lark.md](lark.md)。
+authentik 的安全要求和运维规范见 [authentik.md](authentik.md)，飞书接入见 [feishu.md](feishu.md)。
 
 **搭建顺序**（每一步做完再做下一步）：
 
@@ -173,7 +173,7 @@ deployments/
     ├── values-prod.yaml          # 生产环境特有的配置：域名、数据库地址等
     ├── blueprints/               # authentik 配置代码，见 7.5 节
     └── templates/                # 飞书同步 CronJob、blueprints ConfigMap
-Makefile                          # make test / lint / chart / mirror / image-feishu-sync
+Makefile                          # make lint / chart / mirror / image-feishu-sync
 ```
 
 - 官方 chart 的配置写在 values 文件的 `authentik:` 下面，字段含义见 [官方 chart 的 values.yaml](https://github.com/goauthentik/helm/blob/main/charts/authentik/values.yaml)。
@@ -369,7 +369,7 @@ authentik 用邮件发送密码重置链接和安全告警通知。用公司的�
 
 1. 运行 `iam-passport-prod` 任务。流水线依次执行：
    - 检查 TODO，以及 `Chart.yaml` 里的 authentik 版本号格式是否正确。
-   - 运行飞书同步脚本的测试和 `helm lint`。
+   - 运行 `helm lint`。
    - 构建飞书同步镜像并推送到 ACR。
    - 执行 `helm upgrade --install`，等待 server 和 worker 就绪，最多 15 分钟。第一次启动时 authentik 会初始化数据库，需要几分钟。
 
@@ -386,14 +386,16 @@ authentik 用邮件发送密码重置链接和安全告警通知。用公司的�
 4. 按 [authentik.md 第 3 节](authentik.md#3-安装后的安全加固) 做剩下的安全加固。
 5. 按 3.8 节第 5 步发一封测试邮件。
 6. 在管理后台的 System → Outpost Integrations 里，应能看到一个自动创建的 “Local Kubernetes Cluster”，状态健康。第 6 节创建 outpost 时会用到它。
-7. 在 Flows → `default-source-authentication` → Stage Bindings 里，应能看到 blueprint 创建的 `feishu-only-managed-users-deny`。
+7. 在 Flows → `default-source-authentication` → Stage Bindings 里，应能看到 blueprint 创建的 `feishu-only-managed-users-deny`；在 `default-authentication-flow` 里，应能看到 `password-login-only-exceptions-deny`（order 15）和 `password-login-require-mfa`（order 31）。
+
+   注意第 3 步：这个 blueprint 应用后，`akadmin` 用密码登录时如果还没绑定 MFA，会被要求当场绑定 TOTP。
 
 每次发布时，`helm template` 渲染出的完整 manifest 会作为构建产物保存在 Jenkins 上，可以用来核对实际发布的内容。
 
 ## 5. 启用飞书同步
 
-1. 按 [lark.md 第 2、3 节](lark.md#2-创建飞书应用) 配置飞书应用和扫码登录。
-2. 按 [lark.md 5.1 节](lark.md#51-准备-authentik-服务账号) 创建服务账号和 API token。
+1. 按 [feishu.md 第 2、3 节](feishu.md#2-创建飞书应用) 配置飞书应用和扫码登录。
+2. 按 [feishu.md 5.1 节](feishu.md#51-准备-authentik-服务账号) 创建服务账号和 API token。
 3. 创建飞书同步的 Secret：
 
    ```bash
@@ -414,7 +416,7 @@ authentik 用邮件发送密码重置链接和安全告警通知。用公司的�
    kubectl -n iam-passport-prod logs -f job/<上一条命令创建的 job 名称>
    ```
 
-   按 [lark.md 5.3 节](lark.md#53-试运行) 逐条核对输出。
+   按 [feishu.md 5.3 节](feishu.md#53-试运行) 逐条核对输出。
 6. 核对无误后，把 `feishuSync.dryRun` 改成 `false`，提交后运行流水线。
 
 ## 6. 启用 LDAP outpost
@@ -530,7 +532,8 @@ outpost 不写在 chart 里，由 authentik 的 worker 在同一个 namespace �
 
 | 文件 | 作用 |
 |---|---|
-| `feishu-only-managed-users.yaml` | 只允许同步脚本建的账号用飞书扫码登录，见 [lark.md 3.5 节](lark.md#35-防止扫码冒用手工账号) |
+| `feishu-only-managed-users.yaml` | 只允许同步脚本建的账号用飞书扫码登录，见 [feishu.md 3.5 节](feishu.md#35-防止扫码冒用手工账号) |
+| `password-login-exceptions.yaml` | 员工账号只能扫码，`密码登录例外` 组和手工账号才能用密码登录，且必须过 MFA，见 [authentik.md 第 3 节](authentik.md#3-安装后的安全加固) |
 
 建议逐步把流程、策略、应用和绑定都写成 blueprints，经过代码评审后发布，不在管理后台直接修改。写法参考 [blueprints 文档](https://docs.goauthentik.io/customize/blueprints/)。新的 blueprint 先在本地验证：
 

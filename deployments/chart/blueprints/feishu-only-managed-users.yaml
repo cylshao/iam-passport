@@ -1,6 +1,8 @@
 # Only accounts the Feishu sync created may log in through Feishu
-# (docs/lark.md 3.5). The source links by username, so without this a Feishu
-# user whose email prefix is akadmin would log in as akadmin.
+# (docs/feishu.md 3.5). The source links by username; its property mapping looks
+# the synced account up by union_id, and this is the second line of defence if
+# that mapping is ever changed to derive the username from the English name,
+# which would let a Feishu user named Akadmin log in as akadmin.
 #
 # A deny stage ahead of the login stage, bound to a policy that passes only for
 # accounts without the feishu_managed attribute; the default flow's own

@@ -3,7 +3,7 @@
 本文说明 authentik 统一身份平台的生产方案：安全加固、权限设计、系统接入、高可用与应急、日常运维和上线检查。适用于 500 到 1000 人、使用飞书作为组织架构来源的场景。
 
 - 部署的具体操作步骤见 [deploy-acs.md](deploy-acs.md)。
-- 飞书扫码登录和通讯录同步见 [lark.md](lark.md)。
+- 飞书扫码登录和通讯录同步见 [feishu.md](feishu.md)。
 
 基于 authentik 2026.8.5 编写。升级到新版本前，先对照官方 [Release Notes](https://docs.goauthentik.io/releases/) 检查本文内容是否仍然适用。
 
@@ -16,8 +16,6 @@
 | 内容 | 状态 | 验证方法 |
 |---|---|---|
 | authentik 的 “Search full LDAP directory” 权限名 | 未核对 | 和 LDAP provider 的权限设置页面对照 |
-
-飞书扫码登录和同步脚本的待验证项见 [lark.md 第 0 节](lark.md#0-文档状态)。
 
 ## 1. 总体架构
 
@@ -108,23 +106,36 @@ flowchart LR
 安装完成后马上处理：
 
 1. 给 `akadmin` 开启 MFA，并删除 Secret 里的初始密码，步骤见 [deploy-acs.md 第 4 节](deploy-acs.md#4-首次部署)。
-2. 另建一个应急管理员账号，用本地密码加 MFA。用户名不能和任何员工的邮箱前缀相同，否则同步脚本建号时会冲突。
-3. 把 `default-authentication-flow` 里的 MFA 校验改为强制配置。这一项只影响用账号密码登录的人（管理员和应急账号），飞书扫码登录不走这一步。
+2. 另建一个应急管理员账号，用本地密码加 MFA。用户名不要用常见英文名，避免和员工重名（重名时同步脚本会给员工的用户名加数字，员工容易混淆）。
+3. 密码登录的规则由 blueprint `password-login-exceptions.yaml` 配置，随 Helm chart 发布，不要在后台手工修改：
+
+   | 账号 | 飞书扫码 | 密码登录 |
+   |---|---|---|
+   | 同步脚本建的员工账号 | 可以 | 拒绝，提示用飞书扫码 |
+   | 员工账号，且在 `密码登录例外` 组里 | 可以 | 可以，必须过 MFA |
+   | `akadmin`、应急管理员等手工账号 | 拒绝（`feishu-only-managed-users.yaml`） | 可以，必须过 MFA |
+
+   密码登录时，已经绑定 MFA 设备的人校验动态码；还没绑定的人要先当场绑定 TOTP 才能登录。所以把员工加进例外组后，让他马上扫码登录、设置密码并绑定 MFA，不要让只有密码、还没绑 MFA 的状态拖着。
+
+   例外组只给两类人：飞书故障时要能登录的关键岗位（见 [feishu.md 6.2 节](feishu.md#62-飞书故障的影响)），以及确实要用只支持密码的系统的人。成员由管理员手工维护，blueprint 不会改动。
+
+   这条规则只作用于登录页（`default-authentication-flow`）。飞书扫码走 `default-source-authentication`，不受影响；LDAP、RADIUS 走各自的 bind flow，也不受影响，见 6.4 节。
 4. 在系统设置里关闭“允许用户修改姓名、邮箱、用户名”，资料统一以飞书为准。不关的话，用户改了也会被同步脚本覆盖。
 5. 管理员账号的邮箱和密码要准确记录在公司的密码管理工具里。
-6. 配置防止扫码冒用手工账号的策略，并落实飞书账号安全要求，见 [lark.md 3.5 节和 6.1 节](lark.md#35-防止扫码冒用手工账号)。
+6. 在 System → Settings 里把 Avatars 改成 `attributes.avatar,initials`：有飞书头像（同步脚本写在账号的 `avatar` 属性里）就用飞书头像，没有就显示姓名首字母。不要用默认的 `gravatar`，国内访问慢，还会把邮箱的哈希发给外部服务。通过 OIDC 接入的系统能从 `profile` scope 的 `picture` 拿到头像地址，但 GitLab 不读这个字段，仍显示自己的默认头像。
+7. 配置防止扫码冒用手工账号的策略，并落实飞书账号安全要求，见 [feishu.md 3.5 节和 6.1 节](feishu.md#35-防止扫码冒用手工账号)。
 
 ### 3.1 会话和密码策略
 
 - **会话时长**：在登录流程的 User Login 步骤里明确设置 authentik 的会话有效期，比如 8 到 12 小时，不要依赖默认值。管理员可以单独设得更短。
-- **密码策略**：用 JumpServer、VPN 的员工需要单独设置 authentik 密码。给密码修改流程配置密码强度策略（长度、复杂度，可开启泄露密码检查）。
+- **密码策略**：例外组的员工，以及用 JumpServer、VPN（LDAP、RADIUS 接入）的员工，需要单独设置 authentik 密码。给密码修改流程配置密码强度策略（长度、复杂度，可开启泄露密码检查）。
 - **LDAP 和 RADIUS 只能做密码认证**：所以 JumpServer 自身的 MFA 必须开启；VPN 需要动态码时按 6.5 节的格式输入。
 - **时间同步**：所有 authentik 节点、outpost 和下游系统都要开启 NTP。时间不准会导致 MFA 动态码和 token 校验失败。
 
 ### 3.2 管理员账号的使用规则
 
 - `akadmin` 和应急管理员只用于管理和应急，日常不使用。
-- 管理员本人日常用飞书扫码登录自己的账号，例如 `charles.shao`。需要管理权限时，把这个账号加入 `authentik Admins` 组。
+- 管理员本人日常用飞书扫码登录自己的账号，例如 `david`。需要管理权限时，把这个账号加入 `authentik Admins` 组。
 - 管理员离职时，要同时检查 `authentik Admins` 组和所有服务账号的 token。
 - 管理员人数控制在 2 到 3 人，每季度复核一次 `authentik Admins` 组成员。
 
@@ -146,7 +157,7 @@ authentik 里的员工账号和部门组由同步脚本从通讯录维护，员�
 
 | 来源 | 文档 | 代码 |
 |---|---|---|
-| 飞书 | [lark.md](lark.md) | `org-sync/feishu/` |
+| 飞书 | [feishu.md](feishu.md) | `org-sync/feishu/` |
 
 ### 4.1 接入其他通讯录来源
 
@@ -154,18 +165,22 @@ authentik 里的员工账号和部门组由同步脚本从通讯录维护，员�
 
 ```text
 org-sync/
-├── feishu/      # 飞书
-├── dingtalk/    # 钉钉（规划中）
-└── slack/       # Slack（规划中）
+├── common/              # 各来源共用：authentik API 客户端、带重试的 HTTP 请求
+├── feishu/              # 飞书
+├── dingtalk/            # 钉钉（规划中）
+├── slack/               # Slack（规划中）
+└── requirements.txt     # 各来源共用的 Python 依赖
 ```
+
+每个来源的目录里放读取这个来源的代码（如 `feishu/contacts.py`）和入口 `main.py`，在 `org-sync` 目录下用 `python3 -m <来源>.main` 运行。authentik 的读写和重试直接用 `common/` 里的。
 
 新增来源时遵守以下约定，避免不同来源的脚本互相干扰：
 
 - **各管各的账号**：每个脚本用自己的标记属性（飞书是 `feishu_managed`，钉钉可用 `dingtalk_managed`），只修改和禁用带自己标记的用户和组。否则飞书脚本会把钉钉来的员工当成离职禁用掉。
 - **组名用来源做前缀**：如 `飞书/技术中心`、`钉钉/销售部`，避免同名部门冲突。
 - **一个人只属于一个来源**：同一个员工同时出现在两个来源时，第二个脚本会因为用户名已存在而建号失败。接入前先确定每类人员以哪个来源为准，例如正式员工以飞书为准，海外团队以 Slack 为准。
-- **用户名规则和登录方式一致**：如果这个来源也提供扫码或单点登录，authentik 里对应 source 的属性映射必须和同步脚本使用相同的用户名规则，参考 [lark.md 3.2 节](lark.md#32-属性映射)。
-- **独立部署和监控**：每个来源一个独立的 CronJob（在 `deployments/chart/templates/` 下仿照 `feishu-sync.yaml` 新增）和独立的 Secret，各自配置告警，参考 [lark.md 第 5、6 节](lark.md#5-部署同步脚本)。
+- **用户名规则和登录方式一致**：如果这个来源也提供扫码或单点登录，authentik 里对应 source 的属性映射必须和同步脚本使用相同的用户名规则，参考 [feishu.md 3.2 节](feishu.md#32-属性映射)。
+- **独立部署和监控**：每个来源一个独立的 CronJob（在 `deployments/chart/templates/` 下仿照 `feishu-sync.yaml` 新增）和独立的 Secret，各自配置告警，参考 [feishu.md 第 5、6 节](feishu.md#5-部署同步脚本)。
 - **保留同样的保护机制**：接口报错时在写入前退出，批量禁用超过阈值时中止。
 
 ## 5. 权限设计
@@ -228,7 +243,7 @@ GitLab、Jenkins 等系统里已经有本地账号。接入单点登录后，如
 每个系统接入前：
 
 1. 导出系统里现有的全部账号（用户名、邮箱、是否管理员）。
-2. 和 authentik 里的账号比对。authentik 的用户名是邮箱前缀，邮箱是飞书里的企业邮箱。
+2. 和 authentik 里的账号比对。authentik 的用户名是员工的英文名（重名时带数字，如 `lily2`），邮箱取自飞书，见 [feishu.md 5.4 和 5.5 节](feishu.md#54-脚本的行为)。老账号一般是邮箱前缀，按用户名对不上，优先让系统按邮箱关联。
 3. 查清这个系统登录时按什么关联老账号：邮箱、用户名，还是 OIDC 的 `sub`。不同系统的行为不同，有的需要单独开启“自动关联已有账号”的配置。
 4. 对不上的账号，在系统里先改成和 authentik 一致的用户名或邮箱，再开启单点登录。
 5. 找几个不同角色的真实员工先试登录，确认看到的是自己原来的账号和项目。
@@ -237,6 +252,8 @@ GitLab、Jenkins 等系统里已经有本地账号。接入单点登录后，如
 ### 6.2 OIDC 系统
 
 在 [authentik 集成文档目录](https://integrations.goauthentik.io/) 里找对应系统的配置说明，例如 [Grafana](https://integrations.goauthentik.io/monitoring/grafana/)、[GitLab](https://integrations.goauthentik.io/development/gitlab/)。
+
+在 authentik 里建 OAuth2 provider 时，Grant types 至少要有 `authorization_code`。用后台或 API 创建时默认就有；用脚本直接写数据库时默认为空，登录会报 “The request is otherwise malformed”。
 
 Grafana 的 scope 加上 `entitlements`，角色映射：
 
@@ -271,7 +288,7 @@ role_attribute_path = contains(entitlements[*], 'Grafana Admins') && 'Admin' || 
    ```bash
    ldapsearch -H ldaps://ldap.company.com:636 -x \
      -D 'cn=svc-jumpserver,ou=users,dc=ldap,dc=company,dc=com' -W \
-     -b 'ou=users,dc=ldap,dc=company,dc=com' '(cn=charles.shao)'
+     -b 'ou=users,dc=ldap,dc=company,dc=com' '(cn=david)'
    ```
 
 4. JumpServer 系统设置 → 认证设置 → LDAP：
@@ -290,7 +307,8 @@ role_attribute_path = contains(entitlements[*], 'Grafana Admins') && 'Admin' || 
 注意：
 
 - authentik 的 LDAP 只支持认证和查询，不能通过 LDAP 改密码或写入数据。
-- 同步脚本建的账号默认没有密码。要用 JumpServer 的人，先在 authentik 个人设置里设置密码。
+- 同步脚本建的账号默认没有密码。要用 JumpServer 的人，先扫码登录 authentik，在个人设置里设置密码。
+- LDAP 走自己的 bind flow，不受 `password-login-exceptions.yaml` 的限制：员工设置了密码就能通过 LDAP 认证，不需要加入例外组，也不会被要求 MFA。谁能用 LDAP 由 LDAP 应用绑定的组控制，MFA 靠 JumpServer 自己开启。
 - 只用 `ldaps://`（636），不要用明文的 389 端口。
 
 ### 6.5 VPN 和网络设备（RADIUS）
@@ -319,7 +337,7 @@ authentik 或它的数据库不可用时：
 - 所有员工无法登录任何接入的系统。已经登录的系统，在会话过期前还能继续用。
 - VPN 和 JumpServer 也通过 authentik 认证，运维人员连不上 VPN 和服务器，也就无法修复 authentik，形成死循环。
 
-另外，员工只能用飞书扫码登录，所以**飞书故障时新的登录同样会全部失败**，影响和应对见 [lark.md 6.2 节](lark.md#62-飞书故障的影响)。
+另外，员工只能用飞书扫码登录，所以**飞书故障时新的登录同样会全部失败**，影响和应对见 [feishu.md 6.2 节](feishu.md#62-飞书故障的影响)。
 
 所以必须同时做到两点：平时尽量不出故障（高可用），出了故障有不依赖 authentik 的应急通道。
 
@@ -408,7 +426,7 @@ Pod、ALB、RDS、飞书同步的告警规则见 [deploy-acs.md 7.4 节](deploy-
 
 ### 9.4 离职处理
 
-- 正常情况下，由同步脚本在 10 分钟内自动禁用账号并踢掉 authentik 会话。
+- 正常情况下，由同步脚本在 10 分钟内自动禁用账号并踢掉 authentik 会话。账号和资料保留用于审计，不自动删除，见 [feishu.md 5.5 节](feishu.md#55-同步的字段)。
 - 各下游系统里已登录的会话不会马上失效。JumpServer、GitLab 等高危系统要缩短会话有效期。
 - 紧急离职（如安全事件）：先在 authentik 里手动禁用，再到 JumpServer、VPN 等高危系统确认会话已断开。
 - 离职人员如果有个人 token（如 GitLab Personal Access Token、Harbor 机器人账号），需要在对应系统里单独吊销。authentik 禁用账号不会让这些 token 失效。
@@ -450,7 +468,7 @@ authentik 是所有系统的入口。上线前请公司安全团队或外部机�
 
 部署：
 
-- [ ] 正式通知员工之前，已在生产环境按本文和 lark.md 完整走通，两篇文档第 0 节的待验证项已全部确认
+- [ ] 正式通知员工之前，已在生产环境按本文和 feishu.md 完整走通，第 0 节的待验证项已全部确认
 - [ ] server 和 worker 各至少 2 个副本，跨可用区，使用同一个 Secret，没有使用抢占式实例
 - [ ] 使用云数据库，主备跨可用区，已开启自动备份和时间点恢复，并完成一次恢复演练
 - [ ] IAM 使用专用 namespace（最好是独立集群），Jenkins 用 `iam-deployer` 账号发布，Secret 已开启 KMS 加密
@@ -481,7 +499,7 @@ authentik 是所有系统的入口。上线前请公司安全团队或外部机�
 
 人员来源：
 
-- [ ] 已完成 [lark.md 的上线检查清单](lark.md#8-上线检查清单)
+- [ ] 已完成 [feishu.md 的上线检查清单](feishu.md#8-上线检查清单)
 
 系统接入：
 
