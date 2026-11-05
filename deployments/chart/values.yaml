@@ -10,7 +10,7 @@
 # ACR, reached over the cluster's VPC; the region must be the cluster's. `make
 # mirror` copies the upstream images here, since the cluster may not reach
 # ghcr.io. The same prefix appears in authentik.global below.
-registry: TODO-registry-vpc/iam
+registry: iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam
 
 feishuSync:
   # Off until authentik is up and its API token exists (docs/deploy-acs.md 5).
@@ -44,7 +44,7 @@ authentik:
     image:
       # No tag: it defaults to the chart's appVersion, the version Chart.yaml
       # pins.
-      repository: TODO-registry-vpc/iam/authentik-server
+      repository: iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam/authentik-server
     imagePullSecrets:
       - name: aliyun-image-secret
     addPrometheusAnnotations: true
@@ -66,7 +66,7 @@ authentik:
         value: "false"
       # Outposts authentik deploys pull from the same mirror.
       - name: AUTHENTIK_OUTPOSTS__CONTAINER_IMAGE_BASE
-        value: "TODO-registry-vpc/iam/authentik-%(type)s:%(version)s"
+        value: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam/authentik-%(type)s:%(version)s"
       # Feishu Mail over implicit TLS (docs/deploy-acs.md 3.8). The password,
       # a third-party client password rather than the login one, is
       # AUTHENTIK_EMAIL__PASSWORD in the iam-passport-authentik Secret.

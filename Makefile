@@ -6,7 +6,7 @@ AUTHENTIK_TAG := $(shell sed -n '/- name: authentik/,/version:/s/^ *version: *//
 
 APP      ?= iam-passport
 # The public endpoint: `mirror` runs from a machine outside the VPC. ACR replicates to the regions the clusters pull from.
-REGISTRY ?= TODO-registry/iam
+REGISTRY ?= iam-registry.ap-southeast-1.cr.aliyuncs.com/iam
 # Guarded, since these expand on every invocation, even outside a checkout.
 REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 TAG      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)

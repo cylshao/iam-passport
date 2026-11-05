@@ -3,7 +3,7 @@
 #
 # The default base is the ACR mirror (`make mirror`), since the build VPC does
 # not pull from Docker Hub. Local builds override it with BASE_IMAGE.
-ARG BASE_IMAGE=TODO-registry-vpc/public/python:3.13-alpine
+ARG BASE_IMAGE=iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/public/python:3.13-alpine
 FROM ${BASE_IMAGE}
 
 # Traces a container to its commit; unlike a tag, a label travels with the digest.

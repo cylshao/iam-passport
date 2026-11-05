@@ -15,7 +15,7 @@
 
 def build_name = 'iam-passport'
 def git_url = 'git@TODO-gitlab-host:TODO-group/iam-passport.git'
-def push_registry = 'TODO-registry-vpc/iam'
+def push_registry = 'iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam'
 
 // A "Secret text" credential holding the Feishu group bot webhook that hears
 // about failed builds. While it is TODO, failures are not announced.
@@ -66,7 +66,7 @@ pipeline {
     containers:
     - command:
       - cat
-      image: "TODO-registry-vpc/public/python:3.13-alpine"
+      image: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/public/python:3.13-alpine"
       name: "python"
       tty: true
       resources:
@@ -78,7 +78,7 @@ pipeline {
           memory: 2Gi
     - command:
       - cat
-      image: "TODO-registry-vpc/public/executor:debug"
+      image: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/public/executor:debug"
       name: "docker"
       imagePullPolicy: Always
       tty: true
@@ -89,7 +89,7 @@ pipeline {
     # alpine/helm, mirrored by `make mirror`.
     - command:
       - cat
-      image: "TODO-registry-vpc/public/helm:3.19.0"
+      image: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/public/helm:3.19.0"
       name: "helm"
       imagePullPolicy: IfNotPresent
       tty: true

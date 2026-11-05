@@ -102,7 +102,7 @@ namespace `iam-passport-prod` 里有：
 
 计算口径：
 
-- **地域**：按新加坡（`ap-southeast-1`，属于“中国香港及海外”价格区）计算。集群放在中国内地时，ACS 单价约低三分之一（vCPU 0.06 元/小时，内存 0.03 元/GiB/小时）。
+- **地域**：按新加坡（`ap-southeast-1`，属于“中国香港及海外”价格区）计算，和仓库里 ACR 的地域一致。集群放在中国内地时，ACS 单价约低三分之一（vCPU 0.06 元/小时，内存 0.03 元/GiB/小时）。
 - **ACS**：通用型、默认算力质量（不使用抢占式）的按量价格，按秒计费。计费规格取容器的 `limits` 之和，规格写在 `values.yaml`。用 ACK 时没有这部分费用，改为按节点规格计算 ECS 费用。
 - **时长**：每月按 730 小时计算。
 - **价格来源**：阿里云官网的 [ACS 计费规则](https://help.aliyun.com/zh/cs/product-overview/product-billing-rules)、[ALB 计费规则](https://help.aliyun.com/zh/slb/application-load-balancer/alb-billing-rules) 和 RDS 购买页，查询时间为 2026 年 11 月。阿里云会调价，做预算时以当时的价格为准。
@@ -198,13 +198,13 @@ Makefile                          # make lint / chart / mirror / image-feishu-sy
 | `values-prod.yaml` | `TODO-auth.company.com` | authentik 的访问域名（`AUTHENTIK_WEB__BASE_URL`、Ingress 的 `hosts` 和 `tls` 共三处） |
 | `values-prod.yaml` | `TODO-prod.pg.rds.aliyuncs.com` | RDS 的连接地址 |
 | `values.yaml` | `TODO-noreply@company.com` | 发信邮箱（`AUTHENTIK_EMAIL__USERNAME`、`AUTHENTIK_EMAIL__FROM` 两处），见 3.8 节 |
-| `values.yaml`（三处）、`Jenkinsfile`（四处）、`feishu-sync.Dockerfile` | `TODO-registry-vpc` | ACR 实例的 VPC 域名，形如 `<实例名>-registry-vpc.<地域>.cr.aliyuncs.com`，见 3.4 节。`Jenkinsfile` 的 Pod 模板没替换时，agent Pod 拉不到镜像，任务会停在分配 agent，到不了 Checkout |
-| `Makefile` 的 `REGISTRY` | `TODO-registry/iam` | ACR 实例的公网域名，形如 `<实例名>-registry.<地域>.cr.aliyuncs.com`，`make mirror` 推送用 |
 
 **已经填了默认名称的项**：流水线不会检查。实际名称不同时，要在仓库里全部替换。
 
 | 名称 | 出现位置 | 说明 |
 |---|---|---|
+| ACR 实例 `iam`（域名 `iam-registry`、`iam-registry-vpc`） | `values.yaml`（三处）、`Jenkinsfile`、`feishu-sync.Dockerfile`、`Makefile` | 见 3.4 节 |
+| ACR 地域 `ap-southeast-1` | 同上 | 改成集群所在地域 |
 | 拉取镜像的 Secret `aliyun-image-secret` | `values.yaml`、`templates/feishu-sync.yaml`、`Jenkinsfile` | 见 3.2、3.7 节 |
 | Jenkins 的 Kubernetes cloud `iam-k8s` | `Jenkinsfile` 的 `agent.kubernetes.cloud` | Jenkins 系统配置里 Kubernetes cloud 的名称。名称不存在时，任务在分配 agent 时就会失败 |
 | Jenkins agent 的 namespace `ops` | `Jenkinsfile` 的 Pod 模板 | agent Pod 运行的 namespace |
@@ -215,7 +215,7 @@ Makefile                          # make lint / chart / mirror / image-feishu-sy
 替换后用下面的命令检查有没有遗漏的 `TODO`：
 
 ```bash
-grep -rn 'TODO' deployments Makefile --exclude-dir=charts
+grep -rn 'TODO' deployments --exclude-dir=charts
 ```
 
 ### 3.2 集群和 namespace
@@ -238,7 +238,7 @@ sed 's/__namespace__/iam-passport-prod/g' deployments/cluster-setup.yaml | kubec
 ```bash
 read -s ACR_PASS
 kubectl -n iam-passport-prod create secret docker-registry aliyun-image-secret \
-  --docker-server=TODO-registry-vpc \
+  --docker-server=iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com \
   --docker-username='<ACR 只读账号>' --docker-password="$ACR_PASS"
 unset ACR_PASS
 ```
@@ -256,7 +256,7 @@ unset ACR_PASS
 
 ### 3.4 镜像
 
-1. 在集群所在地域创建一个 ACR 企业版实例。它有两个访问域名：公网域名 `<实例名>-registry.<地域>.cr.aliyuncs.com`（推送用）和 VPC 域名 `<实例名>-registry-vpc.<地域>.cr.aliyuncs.com`（集群拉取用），分别替换仓库里的 `TODO-registry` 和 `TODO-registry-vpc`，见 3.1 节。
+1. 在集群所在地域创建一个 ACR 企业版实例，实例名 `iam`。它的访问域名是 `iam-registry.ap-southeast-1.cr.aliyuncs.com`（公网，推送用）和 `iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com`（VPC，集群拉取用）。实例名不同时，把仓库里所有 `iam-registry` 一起改掉。
 2. 在实例里创建两个命名空间：
    - `iam`：authentik、outpost 和飞书同步的镜像，建议开启“镜像版本不可覆盖”。飞书同步镜像每次构建都会生成一个新标签（`prod-<commit>-<构建号>`），给 `iam-passport-feishu-sync` 仓库配置清理规则，保留最近 30 个标签。保留数量不能少于 Helm 保留的 10 个历史版本，否则 `helm rollback` 时旧镜像可能已被删掉。
    - `public`：流水线用的基础镜像和工具镜像。
@@ -265,7 +265,7 @@ unset ACR_PASS
 5. 在一台能访问 `ghcr.io` 和 Docker Hub 的机器上，登录 ACR 的公网地址，然后复制镜像：
 
    ```bash
-   docker login TODO-registry
+   docker login iam-registry.ap-southeast-1.cr.aliyuncs.com
    make mirror
    ```
 
@@ -332,7 +332,7 @@ ALB 的回源地址如果不在 10/8、172.16/12、192.168/16 这些内网网段
 4. 建一个 SSH 凭据 `gitlab-deploy`，对本仓库有只读权限（在 GitLab 里加一个 Deploy Key）。流水线用它拉代码。
 5. Jenkins 的 agent Pod 运行在 Jenkins 所在集群的 `ops` namespace 里，也需要拉取 ACR 镜像和推送飞书同步镜像：
    - 在 `ops` 里创建同名的 `aliyun-image-secret`（方法同 3.2 节），用于拉取 agent 的镜像。
-   - kaniko 推送镜像时读取 `ops` 里 ConfigMap `docker-config` 的 `config.json`，里面要有 `TODO-registry-vpc` 的推送凭证。
+   - kaniko 推送镜像时读取 `ops` 里 ConfigMap `docker-config` 的 `config.json`，里面要有 `iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com` 的推送凭证。
 6. 在运维群里添加一个飞书自定义机器人，把 webhook 地址存成 **Secret text** 类型的凭据，ID 填到 Jenkinsfile 的 `feishu_webhook_credential`。webhook 地址等同于发消息的权限，不要写进仓库。机器人的安全设置选“自定义关键词”，关键词填 `构建失败`；不要开签名校验，流水线没有实现签名。
 7. 任务运行后直接发布到生产，没有审批步骤，所以要在 Jenkins 的权限设置里只给运维负责人这个任务的 Build 权限。同一时间只能有一个构建在运行，后触发的会排队；整个构建超过 30 分钟会被中止。
 
