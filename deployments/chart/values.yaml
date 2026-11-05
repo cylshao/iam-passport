@@ -16,7 +16,7 @@ feishuSync:
   # Off until authentik is up and its API token exists (docs/deploy-acs.md 5).
   enabled: false
   schedule: "*/10 * * * *"
-  # True until a dry run's output has been reviewed (docs/lark.md 5.3).
+  # True until a dry run's output has been reviewed (docs/feishu.md 5.3).
   dryRun: true
   # Set by the pipeline to the image it just built.
   image:
