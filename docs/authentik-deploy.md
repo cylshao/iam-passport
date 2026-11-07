@@ -1,6 +1,6 @@
-# 在阿里云 Kubernetes 上部署
+# 部署与运维
 
-本文说明如何把 iam-passport 部署到阿里云的 Kubernetes 集群（ACS 或 ACK 都可以）。部署方式：
+本文说明如何把 iam-passport 部署到阿里云的 Kubernetes 集群（ACS 或 ACK 都可以），以及上线后的发布、升级、回滚、监控和备份。部署方式：
 
 - 用 **authentik 官方 Helm chart** 部署 authentik，不自己维护 Deployment 文件。
 - 仓库里的 `deployments/chart/` 是一个外层 chart，把官方 chart、飞书同步 CronJob 和 blueprints 打包成一个 Helm release。一次 `helm upgrade` 发布全部内容，一次 `helm rollback` 回滚全部内容。
@@ -8,7 +8,7 @@
 - LDAP、RADIUS 等 outpost 由 authentik **自己在集群里创建和升级**，版本始终和 authentik 一致。
 - Pod 不挂共享存储，全部无状态。
 
-authentik 的安全要求和运维规范见 [authentik.md](authentik.md)，飞书接入见 [feishu.md](feishu.md)。
+authentik 的设计和安全规定见 [authentik.md](authentik.md)，各业务系统的接入见 [integrations.md](integrations.md)，飞书接入见 [feishu.md](feishu.md)。
 
 **搭建顺序**（每一步做完再做下一步）：
 
@@ -25,21 +25,7 @@ authentik 的安全要求和运维规范见 [authentik.md](authentik.md)，飞�
 | 9 | 飞书扫码登录和通讯录同步（第 5 节） | 运维、飞书管理员 |
 | 10 | 监控告警（7.4 节） | 运维 |
 | 11 | 按需启用 LDAP outpost（第 6 节） | 运维 |
-| 12 | 完成 [authentik.md 的上线检查清单](authentik.md#12-上线检查清单)，再通知员工 | CTO、运维 |
-
-## 0. 文档状态
-
-chart 已经用 `helm lint`、`helm template` 和 Kubernetes 1.31 的 schema 校验过，blueprint 已在本地 authentik 2026.8.5 上应用并验证过策略结果，**但还没有在阿里云集群上实际部署过**。以下内容要在第一次部署后、正式通知员工之前确认：
-
-| 内容 | 验证方法 |
-|---|---|
-| ALB Ingress 的注解写法、证书自动发现、健康检查 | 部署后 `https://<域名>/` 能打开，ALB 控制台里后端服务器组是 Pod IP 且健康 |
-| ALB 的 WebSocket | 管理后台能正常打开，Outposts 页面显示在线 |
-| authentik 自动创建的 outpost 在 ACS 上能否启动 | 按第 6 节创建 LDAP outpost 后，namespace 里出现对应的 Deployment，Outposts 页面显示健康 |
-| 内网 NLB 的 Service 注解 | LDAP Service 拿到内网地址，`ldapsearch` 能查到用户 |
-| Jenkins 构建集群能否访问阿里云 PyPI 镜像 | 跑一次流水线，看 feishu-sync 镜像能否构建成功 |
-| 飞书邮箱 SMTP 发信，以及 3.8 节里飞书后台的菜单路径 | `ak test_email` 能收到邮件 |
-| `iam-deployer` 的权限是否足够 | 第一次 `helm upgrade --install` 成功，没有 forbidden 报错 |
+| 12 | 完成 [authentik.md 的上线检查清单](authentik.md#10-上线检查清单)，再通知员工 | CTO、运维 |
 
 ## 1. 部署架构
 
@@ -84,37 +70,7 @@ namespace `iam-passport-prod` 里有：
 
 所有 Pod 都不设置 `compute-qos-strategy`，使用不会被回收的默认实例。authentik 是全公司的登录入口，不能用抢占式实例。
 
-### 成本估算
-
-不含 LDAP outpost 时，每月约 **1300 到 1550 元**。
-
-> 以下是按阿里云官网**目录价**做的估算，用于立项和预算参考。**最终价格以公司与阿里云签订的折扣协议和实际账单为准**，上线前请财务或采购按公司折扣重新核算。
-
-| 组件 | 规格 | 计算方式 | 估算（元/月） |
-|---|---|---|---|
-| authentik server | 2 核 4 GB × 2 | (2 × 0.0886 + 4 × 0.0443) 元/小时 × 730 小时 × 2 个 | 约 520 |
-| authentik worker | 1 核 2 GB × 2 | (1 × 0.0886 + 2 × 0.0443) 元/小时 × 730 小时 × 2 个 | 约 260 |
-| 飞书同步 | 0.5 核 1 GB | 只在运行期间计费，每天 144 次，每次约 1 到 2 分钟（含拉取镜像） | 约 10 |
-| 内网 ALB | 标准版 | 实例费 0.147 元/小时 × 730 小时，约 107 元；加上按流量计的 LCU 费（0.049 元/个/小时），1000 人的登录流量一般每月几十元以内 | 约 110 到 150 |
-| RDS PostgreSQL | 高可用系列 2 核 4 GB，ESSD 云盘 50 GB | 国内地域参考价约 380 元/月，新加坡地域以购买页为准 | 约 400 到 600 |
-| **合计** | | | **约 1300 到 1550** |
-| LDAP outpost（可选） | 0.5 核 1 GB × 2，加内网 NLB | (0.5 × 0.0886 + 1 × 0.0443) 元/小时 × 730 小时 × 2 个，NLB 另计 | 约 130，另加 NLB |
-
-计算口径：
-
-- **地域**：按新加坡（`ap-southeast-1`，属于“中国香港及海外”价格区）计算，和仓库里 ACR 的地域一致。集群放在中国内地时，ACS 单价约低三分之一（vCPU 0.06 元/小时，内存 0.03 元/GiB/小时）。
-- **ACS**：通用型、默认算力质量（不使用抢占式）的按量价格，按秒计费。计费规格取容器的 `limits` 之和，规格写在 `values.yaml`。用 ACK 时没有这部分费用，改为按节点规格计算 ECS 费用。
-- **时长**：每月按 730 小时计算。
-- **价格来源**：阿里云官网的 [ACS 计费规则](https://help.aliyun.com/zh/cs/product-overview/product-billing-rules)、[ALB 计费规则](https://help.aliyun.com/zh/slb/application-load-balancer/alb-billing-rules) 和 RDS 购买页，查询时间为 2026 年 11 月。阿里云会调价，做预算时以当时的价格为准。
-
-降低成本的方式：
-
-- RDS 改为包年包月。海外地域 1 年 7 折、3 年 4.5 折。
-- ACS 购买节省计划，抵扣长期运行的 server 和 worker。
-- ALB 购买资源包，抵扣实例费和 LCU 费。
-- 不要为了省钱把副本数降到 1，或改用抢占式实例。authentik 是全公司的登录入口，高可用的这部分成本必须保留。
-
-表外的共用资源：ACR 企业版实例、NAT 网关（Pod 访问飞书接口和发邮件要用）、SLS 日志、HTTPS 证书。这些通常由多个系统共用，按公司现有资源分摊；单独为 IAM 新建时要另外计入预算。
+按阿里云目录价估算，不含 LDAP outpost 时每月约 1300 到 1550 元，最终以公司折扣为准。计算口径和降低成本的方式见附录 B。
 
 ### 上线后的 Pod
 
@@ -154,7 +110,7 @@ authentik 只有“在后台上传图片”（logo、背景图、应用图标）
 这里的做法是**不在后台上传文件**：
 
 - logo、背景图等放到 OSS 或 CDN，在品牌设置和应用设置里填 URL。
-- 登录页的样式用品牌设置里的自定义 CSS，见 [authentik.md 第 8 节](authentik.md#8-登录页品牌定制)。
+- 登录页的样式用品牌设置里的自定义 CSS，见 [7.7 节](#77-登录页品牌定制)。
 
 这样 server 和 worker 完全无状态，Pod 可以随时重建、扩容或迁移。如果后台误上传了文件，文件只会出现在某一个 Pod 上，Pod 重建后就会丢失。
 
@@ -421,7 +377,7 @@ authentik 用邮件发送密码重置链接和安全告警通知。用公司的�
 
 ## 6. 启用 LDAP outpost
 
-先按 [authentik.md 6.4 节](authentik.md#64-jumpserverldap) 确认 JumpServer 确实需要 LDAP，而不是用 OIDC 接入。
+先按 [integrations.md 第 6 节](integrations.md#6-jumpserverldap) 确认 JumpServer 确实需要 LDAP，而不是用 OIDC 接入。
 
 outpost 不写在 chart 里，由 authentik 的 worker 在同一个 namespace 里创建 Deployment 和 Service。authentik 升级时，outpost 会自动升到相同版本。
 
@@ -462,12 +418,12 @@ outpost 不写在 chart 里，由 authentik 的 worker 在同一个 namespace �
            service.beta.kubernetes.io/alibaba-cloud-loadbalancer-zone-maps: "<可用区1>:<交换机1>,<可用区2>:<交换机2>"
    ```
 
-   NLB 的注解以阿里云当前的 CCM 文档为准，第一次配置后按第 0 节验证。不用 ACS 时，去掉两条 `alibabacloud.com` 标签。
+   NLB 的注解以阿里云当前的 CCM 文档为准，第一次配置后按附录 A 验证。不用 ACS 时，去掉两条 `alibabacloud.com` 标签。
 
 4. 保存后几十秒内，namespace 里会出现 `ak-outpost-<名称>` 的 Deployment 和 Service，Outposts 页面显示健康。
-5. Service 会同时暴露 389 和 636 端口。在 NLB 的访问控制里只放行 JumpServer 的地址，JumpServer 只配置 `ldaps://<NLB 地址>:636`，配置方法见 authentik.md 6.4 节。
+5. Service 会同时暴露 389 和 636 端口。在 NLB 的访问控制里只放行 JumpServer 的地址，JumpServer 只配置 `ldaps://<NLB 地址>:636`，配置方法见 [integrations.md 第 6 节](integrations.md#6-jumpserverldap)。
 
-## 7. 日常操作
+## 7. 日常运维
 
 ### 7.1 发布
 
@@ -475,15 +431,22 @@ outpost 不写在 chart 里，由 authentik 的 worker 在同一个 namespace �
 
 ### 7.2 升级 authentik
 
+**版本策略**：
+
+- 版本号格式是“年.月”，2026 年起每季度一个版本。只有最近两个版本会收到安全补丁，所以最多落后一个版本。
+- 订阅 authentik 的 [GitHub Security Advisories](https://github.com/goauthentik/authentik/security/advisories) 和版本发布通知，有高危漏洞时尽快打补丁。
+- 数据库迁移不可逆，出问题时只能用 RDS 备份恢复，不能只把版本号改回去。
+
+**升级步骤**：
+
 1. 阅读新版本的 Release Notes 和官方 chart 的变更说明，备份 RDS。
 2. 修改 `deployments/chart/Chart.yaml` 里 authentik 依赖的 `version`。这是仓库里唯一写版本号的地方：官方 chart 的版本号和 authentik 版本号相同，镜像标签默认就取它，`make mirror` 和本地的 `make up` 也从这里读取。
 3. 运行 `make chart` 更新 `charts/` 下的本地副本，运行 `make mirror` 复制新镜像，运行 `make lint` 检查。把 `Chart.yaml`、`Chart.lock`、`charts/` 一起提交。
-4. 在本地 Docker 上先升级：运行 `make up`（会自动换成新版本），再应用 `deployments/chart/blueprints/` 下的文件（方法见 7.5 节），按 [authentik.md 9.2 节](authentik.md#92-升级) 做回归测试。本地没有真实的飞书和下游系统，这一步主要验证数据库迁移、blueprints、登录页和管理后台。
-5. 选业务低峰时段，运行 `iam-passport-prod` 任务。server 和 worker 随发布升级，outpost 随后由 authentik 自动升级。发布后立即验证飞书扫码登录和几个主要系统的单点登录。
+4. 在本地 Docker 上先升级：运行 `make up`（会自动换成新版本），再应用 `deployments/chart/blueprints/` 下的文件（方法见 7.5 节），检查登录页、用户门户和管理后台。本地没有真实的飞书和下游系统，这一步主要验证数据库迁移、blueprints 和页面显示。
+5. 选业务低峰时段，运行 `iam-passport-prod` 任务。server 和 worker 随发布升级，outpost 随后由 authentik 自动升级。
+6. 发布后立即做回归测试：飞书扫码登录、同步脚本 `--dry-run`、每类接入方式各一个系统（OIDC、代理认证、LDAP、RADIUS）、登录页显示。
 
 没有测试环境，生产升级就是第一次在真实数据上运行新版本的数据库迁移。所以第 1 步的 RDS 备份必须做，而且要确认备份已完成再发布。大版本升级（跨多个版本或 Release Notes 里有破坏性变更）时，可以用 RDS 的克隆实例临时建一个 namespace 演练，演练后删除。
-
-数据库迁移不可逆，出问题时只能用 RDS 备份恢复，不能只把版本号改回去。
 
 ### 7.3 回滚
 
@@ -523,10 +486,17 @@ outpost 不写在 chart 里，由 authentik 的 worker 在同一个 namespace �
 | 飞书同步失败 | `kube_job_status_failed{namespace="iam-passport-prod"}` 增加 |
 | outpost | Outposts 页面显示不健康，或 `ak-outpost-*` Deployment 可用副本数少于期望值 |
 | RDS | CPU、连接数、存储空间、主备延迟 |
+| 证书 | HTTPS 和 LDAPS 证书到期前 30 天 |
+| token | 同步脚本和其他服务账号的 token 到期前 |
+| 安全事件 | 管理员登录、应急账号登录、批量禁用、权限变更、登录失败次数异常 |
 
-飞书同步和 authentik 的日志建议通过 SLS 采集，保存至少 6 个月。
+安全事件可以直接用 authentik 发邮件通知：在 Events → Notification Transports 里建一个 Email 类型的通道，再在 Notification Rules 里绑定要通知的事件，接收组选 `ops-admin`。邮件发送的配置见 3.8 节。
+
+飞书同步和 authentik 的日志建议通过 SLS 采集，保存至少 6 个月，见 [authentik.md 第 8 节](authentik.md#8-审计与合规)。
 
 ### 7.5 用 blueprints 管理配置
+
+在后台手工操作出来的配置，没法追溯谁在什么时候改了什么，出了问题也很难恢复。所以配置尽量写成 blueprint（authentik 的声明式配置文件），随 Helm chart 发布。
 
 `deployments/chart/blueprints/` 下的每个 YAML 文件都会进入 ConfigMap，挂载到 worker。worker 启动时以及文件变化后会自动应用。目前有：
 
@@ -535,7 +505,13 @@ outpost 不写在 chart 里，由 authentik 的 worker 在同一个 namespace �
 | `feishu-only-managed-users.yaml` | 只允许同步脚本建的账号用飞书扫码登录，见 [feishu.md 3.5 节](feishu.md#35-防止扫码冒用手工账号) |
 | `password-login-exceptions.yaml` | 员工账号只能扫码，`密码登录例外` 组和手工账号才能用密码登录，且必须过 MFA，见 [authentik.md 第 3 节](authentik.md#3-安装后的安全加固) |
 
-建议逐步把流程、策略、应用和绑定都写成 blueprints，经过代码评审后发布，不在管理后台直接修改。写法参考 [blueprints 文档](https://docs.goauthentik.io/customize/blueprints/)。新的 blueprint 先在本地验证：
+规则：
+
+- 逐步把飞书 source、属性映射、流程、策略、各个应用和 provider、绑定、品牌设置都写成 blueprint，写法参考 [blueprints 文档](https://docs.goauthentik.io/customize/blueprints/)。
+- 配置变更走代码评审，不在管理后台直接修改。
+- 暂时还没写成 blueprint 的配置，在后台修改前后要在变更记录里登记。后台的 Events 页面记录了管理员操作，可以用来核对变更。
+
+新的 blueprint 先在本地验证：
 
 ```bash
 cd authentik
@@ -543,6 +519,27 @@ docker compose exec -u root worker mkdir -p /blueprints/local
 docker compose cp ../deployments/chart/blueprints/<文件名> worker:/blueprints/local/
 docker compose exec worker ak apply_blueprint local/<文件名>
 ```
+
+### 7.6 备份
+
+- PostgreSQL 每天自动备份，至少保留 30 天，并开启时间点恢复。
+- 每季度演练一次恢复：用备份恢复出一个临时 RDS 实例，确认数据完整（用户、应用、绑定都在），演练后删除。
+- Secret `iam-passport-authentik` 的内容（尤其是 `AUTHENTIK_SECRET_KEY`）单独加密备份到密码管理工具，和数据库备份分开存放。数据库备份没有对应的 secret key 时，部分加密数据无法恢复。
+- 登录页用到的图片在 OSS 上开启版本控制。
+
+### 7.7 登录页品牌定制
+
+推荐只用后台的品牌设置，不自己写登录前端：
+
+- **System → Brands**：logo、标题、favicon、默认背景图、自定义 CSS。
+- **Flows → `default-authentication-flow`**：登录页标题（替换 “Welcome to authentik!”）、背景图、布局。
+- 素材放在 OSS 或 CDN 上，在这些设置里填 URL。生产环境不在 Customization → Files 上传文件，原因见第 1 节的[为什么不挂共享存储](#为什么不挂共享存储)。logo 用 SVG，去掉四周留白，横版宽高比约 7:1。
+
+自定义 CSS 的注意事项：
+
+- 只改 CSS 变量（`--ak-`、`--pf-` 开头）和 `::part()`。直接按标签名或 class 写的样式，升级后很容易失效。
+- 每次升级前，在本地 Docker 上用新版本检查登录页和用户门户的显示。
+- CSS 写坏导致进不了后台时，用恢复链接登录（会临时禁用自定义 CSS），再去 Brands 里修复。
 
 ## 8. 应急发布通道
 
@@ -575,3 +572,49 @@ helm upgrade --install iam-passport deployments/chart \
 | 9000 端口 | ALB Ingress |
 | `outposts/ldap/compose.yml` | authentik 自动创建的 outpost 加内网 NLB |
 | 虚拟机 cron 加 `flock` | CronJob 加 `concurrencyPolicy: Forbid` |
+
+## 附录 A. 待验证项
+
+chart 已经用 `helm lint`、`helm template` 和 Kubernetes 1.31 的 schema 校验过，blueprint 已在本地 authentik 2026.8.5 上应用并验证过策略结果，**但还没有在阿里云集群上实际部署过**。以下内容要在第一次部署后、正式通知员工之前确认：
+
+| 内容 | 验证方法 |
+|---|---|
+| ALB Ingress 的注解写法、证书自动发现、健康检查 | 部署后 `https://<域名>/` 能打开，ALB 控制台里后端服务器组是 Pod IP 且健康 |
+| ALB 的 WebSocket | 管理后台能正常打开，Outposts 页面显示在线 |
+| authentik 自动创建的 outpost 在 ACS 上能否启动 | 按第 6 节创建 LDAP outpost 后，namespace 里出现对应的 Deployment，Outposts 页面显示健康 |
+| 内网 NLB 的 Service 注解 | LDAP Service 拿到内网地址，`ldapsearch` 能查到用户 |
+| Jenkins 构建集群能否访问阿里云 PyPI 镜像 | 跑一次流水线，看 feishu-sync 镜像能否构建成功 |
+| 飞书邮箱 SMTP 发信，以及 3.8 节里飞书后台的菜单路径 | `ak test_email` 能收到邮件 |
+| `iam-deployer` 的权限是否足够 | 第一次 `helm upgrade --install` 成功，没有 forbidden 报错 |
+
+## 附录 B. 成本估算
+
+不含 LDAP outpost 时，每月约 **1300 到 1550 元**。
+
+> 以下是按阿里云官网**目录价**做的估算，用于立项和预算参考。**最终价格以公司与阿里云签订的折扣协议和实际账单为准**，上线前请财务或采购按公司折扣重新核算。
+
+| 组件 | 规格 | 计算方式 | 估算（元/月） |
+|---|---|---|---|
+| authentik server | 2 核 4 GB × 2 | (2 × 0.0886 + 4 × 0.0443) 元/小时 × 730 小时 × 2 个 | 约 520 |
+| authentik worker | 1 核 2 GB × 2 | (1 × 0.0886 + 2 × 0.0443) 元/小时 × 730 小时 × 2 个 | 约 260 |
+| 飞书同步 | 0.5 核 1 GB | 只在运行期间计费，每天 144 次，每次约 1 到 2 分钟（含拉取镜像） | 约 10 |
+| 内网 ALB | 标准版 | 实例费 0.147 元/小时 × 730 小时，约 107 元；加上按流量计的 LCU 费（0.049 元/个/小时），1000 人的登录流量一般每月几十元以内 | 约 110 到 150 |
+| RDS PostgreSQL | 高可用系列 2 核 4 GB，ESSD 云盘 50 GB | 国内地域参考价约 380 元/月，新加坡地域以购买页为准 | 约 400 到 600 |
+| **合计** | | | **约 1300 到 1550** |
+| LDAP outpost（可选） | 0.5 核 1 GB × 2，加内网 NLB | (0.5 × 0.0886 + 1 × 0.0443) 元/小时 × 730 小时 × 2 个，NLB 另计 | 约 130，另加 NLB |
+
+计算口径：
+
+- **地域**：按新加坡（`ap-southeast-1`，属于“中国香港及海外”价格区）计算，和仓库里 ACR 的地域一致。集群放在中国内地时，ACS 单价约低三分之一（vCPU 0.06 元/小时，内存 0.03 元/GiB/小时）。
+- **ACS**：通用型、默认算力质量（不使用抢占式）的按量价格，按秒计费。计费规格取容器的 `limits` 之和，规格写在 `values.yaml`。用 ACK 时没有这部分费用，改为按节点规格计算 ECS 费用。
+- **时长**：每月按 730 小时计算。
+- **价格来源**：阿里云官网的 [ACS 计费规则](https://help.aliyun.com/zh/cs/product-overview/product-billing-rules)、[ALB 计费规则](https://help.aliyun.com/zh/slb/application-load-balancer/alb-billing-rules) 和 RDS 购买页，查询时间为 2026 年 11 月。阿里云会调价，做预算时以当时的价格为准。
+
+降低成本的方式：
+
+- RDS 改为包年包月。海外地域 1 年 7 折、3 年 4.5 折。
+- ACS 购买节省计划，抵扣长期运行的 server 和 worker。
+- ALB 购买资源包，抵扣实例费和 LCU 费。
+- 不要为了省钱把副本数降到 1，或改用抢占式实例。authentik 是全公司的登录入口，高可用的这部分成本必须保留。
+
+表外的共用资源：ACR 企业版实例、NAT 网关（Pod 访问飞书接口和发邮件要用）、SLS 日志、HTTPS 证书。这些通常由多个系统共用，按公司现有资源分摊；单独为 IAM 新建时要另外计入预算。

@@ -1,7 +1,7 @@
 // Build and deploy pipeline: test the org sync and the chart, package the sync
 // with kaniko, then `helm upgrade` deployments/chart into the profile's
 // namespace. One release per namespace holds everything, so a failed deploy is
-// undone with `helm rollback` (docs/deploy-acs.md 7.3).
+// undone with `helm rollback` (docs/authentik-deploy.md 7.3).
 //
 // authentik's own images are not built here. `make mirror` copies them into
 // ACR whenever the authentik version in deployments/chart/Chart.yaml changes,
@@ -23,7 +23,7 @@ def feishu_webhook_credential = 'TODO-iam-passport-feishu-webhook'
 
 // Per profile: the namespace deployments/cluster-setup.yaml created, and the
 // Jenkins "Secret file" credential holding a kubeconfig for that namespace's
-// iam-deployer (docs/deploy-acs.md 3.7). Everything else a profile differs in
+// iam-deployer (docs/authentik-deploy.md 3.7). Everything else a profile differs in
 // lives in deployments/chart/values-<profile>.yaml. A value containing TODO
 // fails Checkout.
 def profiles = [
@@ -46,7 +46,7 @@ def chart_args = ''
 pipeline {
     // The Jenkins environment this runs in: the Kubernetes cloud, the agent
     // namespace (ops), the workspace PVC and the docker-config ConfigMap all
-    // have to exist under these names (docs/deploy-acs.md 3.1, 3.7).
+    // have to exist under these names (docs/authentik-deploy.md 3.1, 3.7).
     agent {
       kubernetes {
         workspaceVolume persistentVolumeClaimWorkspaceVolume(claimName : "jenkins-agent-workspace",readOnly: false)
@@ -209,7 +209,7 @@ pipeline {
                             }
                         } catch (e) {
                             println e
-                            error "deploy failed: see `helm -n ${target.namespace} history iam-passport` and docs/deploy-acs.md 7.3"
+                            error "deploy failed: see `helm -n ${target.namespace} history iam-passport` and docs/authentik-deploy.md 7.3"
                         }
                     }
                 }

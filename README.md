@@ -41,8 +41,9 @@ iam-passport/
 │   ├── common/         # 各来源共用：authentik 客户端、带重试的 HTTP 请求
 │   └── feishu/         # 飞书通讯录 -> authentik
 └── docs/
-    ├── authentik.md    # authentik 生产部署与运维指南
-    ├── deploy-acs.md   # 在阿里云 Kubernetes 上部署
+    ├── authentik.md    # 设计与安全规范：架构、加固、权限、应急、上线检查清单
+    ├── authentik-deploy.md # 部署与运维：在阿里云 Kubernetes 上部署、发布、升级、监控、备份
+    ├── integrations.md # 系统接入：账号迁移、OIDC 配置约定、自研系统、LDAP、RADIUS
     └── feishu.md       # 飞书扫码登录和通讯录同步
 ```
 
@@ -89,10 +90,26 @@ python3 -m feishu.main --dry-run   # 只打印将要做的变更，不写入
 
 生产环境用 authentik 官方 Helm chart 部署在阿里云 Kubernetes（ACS 或 ACK）上，使用专用 namespace `iam-passport-prod`，不设单独的测试环境。`deployments/chart/` 把官方 chart、飞书同步和 blueprints 打包成一个 Helm release，由 Jenkins 流水线发布。LDAP 等 outpost 由 authentik 自己在集群里创建和升级。
 
-运维搭建从 [docs/deploy-acs.md](docs/deploy-acs.md) 开始，文档开头有完整的搭建顺序，需要时会链接到另外两篇：
+运维搭建从 [docs/authentik-deploy.md](docs/authentik-deploy.md) 开始，文档开头有完整的搭建顺序。
 
-- [docs/deploy-acs.md](docs/deploy-acs.md)：怎么部署。准备工作、首次部署、发布、升级、回滚、监控和应急发布。
-- [docs/authentik.md](docs/authentik.md)：怎么用好、管好。安全加固、权限设计、系统接入、高可用与应急、审计合规和上线检查清单。
+## 文档
+
+按角色挑着读，不需要从头读完：
+
+| 你要做的事 | 先读 | 需要时再读 |
+|---|---|---|
+| 评审方案、决定能不能上线 | [authentik.md](docs/authentik.md) 第 1、7 节和第 10 节的检查清单 | [feishu.md](docs/feishu.md) 第 6 节的风险 |
+| 搭建和运维生产环境 | [authentik-deploy.md](docs/authentik-deploy.md) 开头的搭建顺序 | [authentik.md](docs/authentik.md) 第 3 节的安全加固 |
+| 配置飞书扫码和通讯录同步 | [feishu.md](docs/feishu.md) | |
+| 把 GitLab、Jenkins 等系统接入 authentik | [integrations.md](docs/integrations.md) 第 1 到 3 节 | |
+
+OIDC 的原理（授权码流程、令牌、scope）不在这里重复，见博客 [authentik 统一身份认证 · OIDC](https://cylshao.com/posts/authentik-oidc/)。
+
+各篇的内容：
+
+- [docs/authentik.md](docs/authentik.md)：设计与安全规范。总体架构、部署约束、安全加固、权限设计、离职处理、高可用与应急、审计合规和上线检查清单。
+- [docs/authentik-deploy.md](docs/authentik-deploy.md)：部署与运维。准备工作、首次部署、飞书同步和 LDAP outpost 的启用，以及发布、升级、回滚、监控、配置管理、备份、登录页品牌和应急发布。
+- [docs/integrations.md](docs/integrations.md)：系统接入。接入顺序、已有账号的迁移、OIDC 的配置约定和验收、Grafana、自研系统、代理认证、LDAP、RADIUS。
 - [docs/feishu.md](docs/feishu.md)：飞书扫码登录和通讯录同步的配置、风险和上线检查清单。
 
 ## 当前状态
@@ -100,7 +117,7 @@ python3 -m feishu.main --dry-run   # 只打印将要做的变更，不写入
 - authentik 2026.8.5 已在本地 Docker 上验证可以启动和登录。
 - 飞书扫码登录和通讯录同步已在本地 authentik 上用真实飞书租户验证。同步脚本没有自动化测试，修改后先在本地用 `--dry-run` 对照真实通讯录检查输出。
 - 本地验证用的 LDAP outpost 部署文件已编写，配置校验通过，但还没有连接 authentik 实际运行过。
-- Helm chart 已通过 `helm lint` 和 Kubernetes 1.31 的 schema 校验，还没有在集群上部署过；集群、数据库、域名、GitLab 地址等还是占位项，上线前要替换的完整清单见 [docs/deploy-acs.md 3.1 节](docs/deploy-acs.md#31-上线前需要替换的占位项)。
+- Helm chart 已通过 `helm lint` 和 Kubernetes 1.31 的 schema 校验，还没有在集群上部署过；集群、数据库、域名、GitLab 地址等还是占位项，上线前要替换的完整清单见 [docs/authentik-deploy.md 3.1 节](docs/authentik-deploy.md#31-上线前需要替换的占位项)。
 - 第一个 blueprint（只允许同步的账号扫码登录）已在本地 authentik 上验证。Grafana 试点配置尚未编写。
 
 ## 安全提示

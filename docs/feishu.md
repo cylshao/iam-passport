@@ -5,7 +5,7 @@
 - **扫码登录**：员工用飞书扫码登录 authentik，再通过 authentik 单点登录到各个系统。
 - **通讯录同步**：同步脚本每 10 分钟把飞书通讯录同步到 authentik。入职自动建号，部门自动变成用户组，离职或冻结自动禁用。
 
-authentik 本身的部署、安全加固和运维见 [authentik.md](authentik.md)。本文针对飞书中国版（`feishu.cn`）；海外版 Lark 使用 `larksuite.com` 域名，接口地址不同，本文未验证。
+authentik 本身的设计和安全加固见 [authentik.md](authentik.md)，部署和运维见 [authentik-deploy.md](authentik-deploy.md)。本文针对飞书中国版（`feishu.cn`）；海外版 Lark 使用 `larksuite.com` 域名，接口地址不同，本文未验证。
 
 ## 1. 整体流程
 
@@ -171,7 +171,7 @@ user = request.context.get("pending_user")
 return not (user and user.attributes.get("feishu_managed"))
 ```
 
-这个配置写在 blueprint `deployments/chart/blueprints/feishu-only-managed-users.yaml` 里，随 Helm chart 发布后由 worker 自动应用，不要在后台手工修改。本地的应用方法见 [deploy-acs.md 7.5 节](deploy-acs.md#75-用-blueprints-管理配置)。应用后，Flows → `default-source-authentication` → Stage Bindings 里排在最前面的是 `feishu-only-managed-users-deny`，它绑定了策略 `feishu-only-managed-users`。
+这个配置写在 blueprint `deployments/chart/blueprints/feishu-only-managed-users.yaml` 里，随 Helm chart 发布后由 worker 自动应用，不要在后台手工修改。本地的应用方法见 [authentik-deploy.md 7.5 节](authentik-deploy.md#75-用-blueprints-管理配置)。应用后，Flows → `default-source-authentication` → Stage Bindings 里排在最前面的是 `feishu-only-managed-users-deny`，它绑定了策略 `feishu-only-managed-users`。
 
 这样 `akadmin`、应急管理员和服务账号都只能用密码登录。验证方法：临时把 3.2 节的属性映射改成直接返回 `{"username": "akadmin"}`，用任意一个已同步的员工扫码，应被拒绝；验证完改回来。
 
@@ -268,7 +268,7 @@ python3 -m feishu.main             # 真正写入
 
 ### 5.2 部署
 
-生产环境以 Kubernetes CronJob `feishu-sync` 运行，和 authentik 在同一个 Helm release 里，由 Jenkins 流水线构建镜像并发布。脚本通过集群内地址访问 authentik，API token 不经过 ALB。部署文件是 `deployments/chart/templates/feishu-sync.yaml` 和 `deployments/feishu-sync.Dockerfile`。创建 Secret、开启 CronJob、手动触发试运行的命令见 [deploy-acs.md 第 5 节](deploy-acs.md#5-启用飞书同步)。
+生产环境以 Kubernetes CronJob `feishu-sync` 运行，和 authentik 在同一个 Helm release 里，由 Jenkins 流水线构建镜像并发布。脚本通过集群内地址访问 authentik，API token 不经过 ALB。部署文件是 `deployments/chart/templates/feishu-sync.yaml` 和 `deployments/feishu-sync.Dockerfile`。创建 Secret、开启 CronJob、手动触发试运行的命令见 [authentik-deploy.md 第 5 节](authentik-deploy.md#5-启用飞书同步)。
 
 | CronJob 设置 | 值 | 作用 |
 |---|---|---|
@@ -277,7 +277,7 @@ python3 -m feishu.main             # 真正写入
 | `activeDeadlineSeconds` | 540 | 单次运行超过 9 分钟就终止，不影响下一次 |
 | `backoffLimit` | 0 | 失败不重试，等下一次定时运行 |
 
-日志通过 SLS 采集，保存至少 6 个月。告警规则见 [deploy-acs.md 7.4 节](deploy-acs.md#74-监控和告警)。
+日志通过 SLS 采集，保存至少 6 个月。告警规则见 [authentik-deploy.md 7.4 节](authentik-deploy.md#74-监控和告警)。
 
 ### 5.3 试运行
 

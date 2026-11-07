@@ -1,7 +1,7 @@
 # The prod profile: namespace iam-passport-prod. Layered over values.yaml.
 
 # enabled once the iam-passport-feishu-sync Secret exists; dryRun false once
-# a dry run's output has been reviewed (docs/deploy-acs.md 5).
+# a dry run's output has been reviewed (docs/authentik-deploy.md 5).
 feishuSync:
   enabled: false
   dryRun: true

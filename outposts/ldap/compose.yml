@@ -2,7 +2,7 @@
 # 基于官方文档 https://docs.goauthentik.io/add-secure-apps/outposts/manual-deploy-docker-compose/
 # 与官方的差异：端口只绑定到指定的内网地址；默认只开放 LDAPS（636），不开放明文 389。
 #
-# 前置步骤和 JumpServer 的接入配置见 docs/authentik.md 7.4 节。
+# 前置步骤和 JumpServer 的接入配置见 docs/integrations.md 第 6 节。
 services:
   ldap:
     image: ${AUTHENTIK_LDAP_IMAGE:-ghcr.io/goauthentik/ldap}:${AUTHENTIK_TAG:?run make ldap-up from the repository root}

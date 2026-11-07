@@ -3,7 +3,7 @@
 # before it deploys.
 #
 # Secrets are never in these files. Each namespace has two Secrets created by
-# hand (docs/deploy-acs.md 3.5):
+# hand (docs/authentik-deploy.md 3.5):
 #   iam-passport-authentik    AUTHENTIK_SECRET_KEY, AUTHENTIK_POSTGRESQL__PASSWORD
 #   iam-passport-feishu-sync  FEISHU_APP_ID, FEISHU_APP_SECRET, AK_TOKEN
 
@@ -13,7 +13,7 @@
 registry: iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam
 
 feishuSync:
-  # Off until authentik is up and its API token exists (docs/deploy-acs.md 5).
+  # Off until authentik is up and its API token exists (docs/authentik-deploy.md 5).
   enabled: false
   schedule: "*/10 * * * *"
   # True until a dry run's output has been reviewed (docs/feishu.md 5.3).
@@ -27,7 +27,7 @@ feishuSync:
 
 # Pod labels and annotations for every pod this chart creates. Outposts that
 # authentik deploys itself get theirs through the outpost's
-# kubernetes_json_patches (docs/deploy-acs.md 6).
+# kubernetes_json_patches (docs/authentik-deploy.md 6).
 podLabels:
   alibabacloud.com/acs: "true"
   alibabacloud.com/compute-class: general-purpose
@@ -67,7 +67,7 @@ authentik:
       # Outposts authentik deploys pull from the same mirror.
       - name: AUTHENTIK_OUTPOSTS__CONTAINER_IMAGE_BASE
         value: "iam-registry-vpc.ap-southeast-1.cr.aliyuncs.com/iam/authentik-%(type)s:%(version)s"
-      # Feishu Mail over implicit TLS (docs/deploy-acs.md 3.8). The password,
+      # Feishu Mail over implicit TLS (docs/authentik-deploy.md 3.8). The password,
       # a third-party client password rather than the login one, is
       # AUTHENTIK_EMAIL__PASSWORD in the iam-passport-authentik Secret.
       - name: AUTHENTIK_EMAIL__HOST

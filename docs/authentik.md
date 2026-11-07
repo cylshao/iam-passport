@@ -1,21 +1,12 @@
-# authentik 生产部署与运维指南
+# authentik 设计与安全规范
 
-本文说明 authentik 统一身份平台的生产方案：安全加固、权限设计、系统接入、高可用与应急、日常运维和上线检查。适用于 500 到 1000 人、使用飞书作为组织架构来源的场景。
+本文说明 authentik 统一身份平台在设计和安全上的规定：总体架构、部署约束、安全加固、权限、离职、高可用与应急、审计，以及上线前的检查清单。适用于 500 到 1000 人、使用飞书作为组织架构来源的场景。
 
-- 部署的具体操作步骤见 [deploy-acs.md](deploy-acs.md)。
+- 部署、发布、升级、备份、监控等操作步骤见 [authentik-deploy.md](authentik-deploy.md)。
+- 各业务系统怎么接入 authentik 见 [integrations.md](integrations.md)。
 - 飞书扫码登录和通讯录同步见 [feishu.md](feishu.md)。
 
 基于 authentik 2026.8.5 编写。升级到新版本前，先对照官方 [Release Notes](https://docs.goauthentik.io/releases/) 检查本文内容是否仍然适用。
-
-## 0. 文档状态
-
-本文**尚未在真实环境完整走通**。上线前，先在生产环境（正式通知员工之前）按第 3 到第 7 节完整操作一遍，把与实际界面不符的地方改掉，再定稿。
-
-尚待验证的内容：
-
-| 内容 | 状态 | 验证方法 |
-|---|---|---|
-| authentik 的 “Search full LDAP directory” 权限名 | 未核对 | 和 LDAP provider 的权限设置页面对照 |
 
 ## 1. 总体架构
 
@@ -62,11 +53,11 @@ flowchart LR
 
 **authentik 是全公司所有系统的登录入口。** 它一旦不可用，所有人都登录不了任何系统，包括要去修复它的运维人员。第 7 节专门说明高可用和应急通道，上线前必须落实。
 
-## 2. 部署要点
+## 2. 部署约束
 
-生产环境用 authentik 官方 Helm chart 部署在阿里云 Kubernetes 上，只有生产一个环境，使用专用 namespace。资源规格、部署文件和操作步骤都在 [deploy-acs.md](deploy-acs.md)，这里只说明设计上必须遵守的几点。
+生产环境用 authentik 官方 Helm chart 部署在阿里云 Kubernetes 上，只有生产一个环境，使用专用 namespace。资源规格、部署文件和操作步骤都在 [authentik-deploy.md](authentik-deploy.md)，这里只说明设计上必须遵守的几点。
 
-**容量**：server 2 核 4 GB × 2、worker 1 核 2 GB × 2、RDS 2 核 4 GB 起，对 1000 人很宽裕。官方最低要求是 2 核 2 GB，当前版本不依赖 Redis。按目录价估算每月约 1300 到 1550 元，最终以公司折扣为准，明细见 [deploy-acs.md 的成本估算](deploy-acs.md#成本估算)。
+**容量**：server 2 核 4 GB × 2、worker 1 核 2 GB × 2、RDS 2 核 4 GB 起，对 1000 人很宽裕。官方最低要求是 2 核 2 GB，当前版本不依赖 Redis。按目录价估算每月约 1300 到 1550 元，最终以公司折扣为准，明细见 [authentik-deploy.md 附录 B](authentik-deploy.md#附录-b-成本估算)。
 
 **多副本**：
 
@@ -105,7 +96,7 @@ flowchart LR
 
 安装完成后马上处理：
 
-1. 给 `akadmin` 开启 MFA，并删除 Secret 里的初始密码，步骤见 [deploy-acs.md 第 4 节](deploy-acs.md#4-首次部署)。
+1. 给 `akadmin` 开启 MFA，并删除 Secret 里的初始密码，步骤见 [authentik-deploy.md 第 4 节](authentik-deploy.md#4-首次部署)。
 2. 另建一个应急管理员账号，用本地密码加 MFA。用户名不要用常见英文名，避免和员工重名（重名时同步脚本会给员工的用户名加数字，员工容易混淆）。
 3. 密码登录的规则由 blueprint `password-login-exceptions.yaml` 配置，随 Helm chart 发布，不要在后台手工修改：
 
@@ -119,7 +110,7 @@ flowchart LR
 
    例外组只给两类人：飞书故障时要能登录的关键岗位（见 [feishu.md 6.2 节](feishu.md#62-飞书故障的影响)），以及确实要用只支持密码的系统的人。成员由管理员手工维护，blueprint 不会改动。
 
-   这条规则只作用于登录页（`default-authentication-flow`）。飞书扫码走 `default-source-authentication`，不受影响；LDAP、RADIUS 走各自的 bind flow，也不受影响，见 6.4 节。
+   这条规则只作用于登录页（`default-authentication-flow`）。飞书扫码走 `default-source-authentication`，不受影响；LDAP、RADIUS 走各自的 bind flow，也不受影响，见 [integrations.md 第 6 节](integrations.md#6-jumpserverldap)。
 4. 在系统设置里关闭“允许用户修改姓名、邮箱、用户名”，资料统一以飞书为准。不关的话，用户改了也会被同步脚本覆盖。
 5. 管理员账号的邮箱和密码要准确记录在公司的密码管理工具里。
 6. 在 System → Settings 里把 Avatars 改成 `attributes.avatar,initials`：有飞书头像（同步脚本写在账号的 `avatar` 属性里）就用飞书头像，没有就显示姓名首字母。不要用默认的 `gravatar`，国内访问慢，还会把邮箱的哈希发给外部服务。通过 OIDC 接入的系统能从 `profile` scope 的 `picture` 拿到头像地址，但 GitLab 不读这个字段，仍显示自己的默认头像。
@@ -129,7 +120,7 @@ flowchart LR
 
 - **会话时长**：在登录流程的 User Login 步骤里明确设置 authentik 的会话有效期，比如 8 到 12 小时，不要依赖默认值。管理员可以单独设得更短。
 - **密码策略**：例外组的员工，以及用 JumpServer、VPN（LDAP、RADIUS 接入）的员工，需要单独设置 authentik 密码。给密码修改流程配置密码强度策略（长度、复杂度，可开启泄露密码检查）。
-- **LDAP 和 RADIUS 只能做密码认证**：所以 JumpServer 自身的 MFA 必须开启；VPN 需要动态码时按 6.5 节的格式输入。
+- **LDAP 和 RADIUS 只能做密码认证**：所以 JumpServer 自身的 MFA 必须开启；VPN 需要动态码时按 [integrations.md 第 7 节](integrations.md#7-vpn-和网络设备radius) 的格式输入。
 - **时间同步**：所有 authentik 节点、outpost 和下游系统都要开启 NTP。时间不准会导致 MFA 动态码和 token 校验失败。
 
 ### 3.2 管理员账号的使用规则
@@ -151,7 +142,7 @@ kubectl -n iam-passport-prod exec deploy/authentik-worker -- ak create_recovery_
 - 链接只能用一次。用过之后再打开会显示 Not Found，这是正常的。
 - 复制时要复制完整。有些工具会把长链接显示成中间带省略号的样子，复制出来的链接就不能用。
 
-## 4. 人员来源接入
+## 4. 人员来源
 
 authentik 里的员工账号和部门组由同步脚本从通讯录维护，员工通过对应的扫码或单点登录方式登录。
 
@@ -218,115 +209,12 @@ org-sync/
 
 配好后先在本地 Docker 上验证，上线前再在生产环境用一个普通员工和一个管理员各验证一次。
 
-## 6. 系统接入
+## 6. 离职处理
 
-按风险从低到高逐个接入，每接一个就验证一个：
-
-1. Grafana（试点，风险最低）
-2. GitLab、Jenkins、Harbor、Argo CD
-3. Prometheus、Alertmanager
-4. JumpServer
-5. VPN 和网络设备
-
-每个系统接入时都要做的事：
-
-- 按 6.1 节完成已有账号的比对和迁移方案。
-- 在 authentik 里配置绑定，确认只有该用的人能登录。
-- 验证角色映射：管理员、普通用户、无权限用户各测一次。
-- 关闭系统的本地注册和本地密码登录，只保留一个应急管理员（见第 7 节）。
-- 把接入步骤写到 `docs/` 下，方便后续维护。
-
-### 6.1 已有账号的迁移
-
-GitLab、Jenkins 等系统里已经有本地账号。接入单点登录后，如果系统认为新的登录身份和原账号不是同一个人，就会新建一个重复账号，员工原有的项目、权限、历史记录都留在旧账号下。这是推广阶段最容易出事故的环节。
-
-每个系统接入前：
-
-1. 导出系统里现有的全部账号（用户名、邮箱、是否管理员）。
-2. 和 authentik 里的账号比对。authentik 的用户名是员工的英文名（重名时带数字，如 `lily2`），邮箱取自飞书，见 [feishu.md 5.4 和 5.5 节](feishu.md#54-脚本的行为)。老账号一般是邮箱前缀，按用户名对不上，优先让系统按邮箱关联。
-3. 查清这个系统登录时按什么关联老账号：邮箱、用户名，还是 OIDC 的 `sub`。不同系统的行为不同，有的需要单独开启“自动关联已有账号”的配置。
-4. 对不上的账号，在系统里先改成和 authentik 一致的用户名或邮箱，再开启单点登录。
-5. 找几个不同角色的真实员工先试登录，确认看到的是自己原来的账号和项目。
-6. 已离职但系统里还在的账号，借这次机会清理掉。
-
-### 6.2 OIDC 系统
-
-在 [authentik 集成文档目录](https://integrations.goauthentik.io/) 里找对应系统的配置说明，例如 [Grafana](https://integrations.goauthentik.io/monitoring/grafana/)、[GitLab](https://integrations.goauthentik.io/development/gitlab/)。
-
-在 authentik 里建 OAuth2 provider 时，Grant types 至少要有 `authorization_code`。用后台或 API 创建时默认就有；用脚本直接写数据库时默认为空，登录会报 “The request is otherwise malformed”。
-
-Grafana 的 scope 加上 `entitlements`，角色映射：
-
-```ini
-role_attribute_path = contains(entitlements[*], 'Grafana Admins') && 'Admin' || contains(entitlements[*], 'Grafana Editors') && 'Editor' || 'Viewer'
-```
-
-### 6.3 Prometheus、Alertmanager
-
-用 Proxy provider 的 “Forward auth (single application)” 模式，在 Nginx 里加 `auth_request`，参考 [Forward auth 文档](https://docs.goauthentik.io/add-secure-apps/providers/proxy/forward_auth/)。记得把应用加到内置 outpost（embedded outpost）上。
-
-### 6.4 JumpServer（LDAP）
-
-**先评估用 OIDC 接入 JumpServer。** JumpServer 的认证设置里也支持 OIDC（以你们使用的版本为准）。用 OIDC 接入有三个好处：员工直接扫码登录，不用再单独设置 authentik 密码；可以用 5.1 节的二次 MFA；不需要部署和维护 LDAP outpost。只有 JumpServer 的版本或功能确实不支持时，才按下面的步骤走 LDAP。
-
-1. 在 authentik 里准备 LDAP：
-   - 建一个专用的 bind flow，只包含识别、密码、登录三个步骤，不带飞书按钮。
-   - 建 LDAP provider：Base DN 填 `dc=ldap,dc=company,dc=com`，选择 `ldap.company.com` 的证书，bind flow 选上一步建的流程。
-   - 建 LDAP 应用，绑定 `飞书/技术中心`。
-   - 建服务账号 `svc-jumpserver`，授予它对该 LDAP provider 的 “Search full LDAP directory” 权限。
-2. 部署 outpost，只对内网开放：
-   - **生产环境**：在 Applications → Outposts 里新建 LDAP 类型的 outpost，Integration 选 “Local Kubernetes Cluster”，由 authentik 在集群里创建，前面挂内网 NLB。配置见 [deploy-acs.md 第 6 节](deploy-acs.md#6-启用-ldap-outpost)。
-   - **本地验证**：Integration 留空（手动部署），保存后点 View Deployment Info 获取 token，再用 `outposts/ldap/` 启动：
-
-     ```bash
-     cp outposts/ldap/.env.example outposts/ldap/.env    # 填写 AUTHENTIK_HOST、AUTHENTIK_TOKEN、LDAP_BIND_IP
-     make ldap-up
-     ```
-
-3. 在 Outposts 页面确认状态为健康，再用 `ldapsearch` 验证：
-
-   ```bash
-   ldapsearch -H ldaps://ldap.company.com:636 -x \
-     -D 'cn=svc-jumpserver,ou=users,dc=ldap,dc=company,dc=com' -W \
-     -b 'ou=users,dc=ldap,dc=company,dc=com' '(cn=david)'
-   ```
-
-4. JumpServer 系统设置 → 认证设置 → LDAP：
-
-   | 项 | 值 |
-   |---|---|
-   | 地址 | `ldaps://ldap.company.com:636` |
-   | 绑定 DN | `cn=svc-jumpserver,ou=users,dc=ldap,dc=company,dc=com` |
-   | 用户 OU | `ou=users,dc=ldap,dc=company,dc=com` |
-   | 用户过滤器 | `(cn=%(user)s)` |
-   | 属性映射 | `{"username": "cn", "name": "name", "email": "mail"}` |
-
-5. JumpServer 里开启强制 MFA，按用户组授权服务器。
-6. 保留 JumpServer 的本地管理员账号作为应急通道，见第 7 节。
-
-注意：
-
-- authentik 的 LDAP 只支持认证和查询，不能通过 LDAP 改密码或写入数据。
-- 同步脚本建的账号默认没有密码。要用 JumpServer 的人，先扫码登录 authentik，在个人设置里设置密码。
-- LDAP 走自己的 bind flow，不受 `password-login-exceptions.yaml` 的限制：员工设置了密码就能通过 LDAP 认证，不需要加入例外组，也不会被要求 MFA。谁能用 LDAP 由 LDAP 应用绑定的组控制，MFA 靠 JumpServer 自己开启。
-- 只用 `ldaps://`（636），不要用明文的 389 端口。
-
-### 6.5 VPN 和网络设备（RADIUS）
-
-**先确认 VPN 是否支持 SAML 或 OIDC。** 很多企业级 VPN 支持浏览器跳转式的单点登录，员工可以直接扫码，也能用 5.1 节的二次 MFA。RADIUS 只能用密码认证，动态码要拼在密码后面输入，员工体验差，适合作为网络设备和不支持单点登录的 VPN 的兜底方案。
-
-- 建 RADIUS provider，配置共享密钥和允许的客户端网段。
-- 和 LDAP 一样，新建 RADIUS 类型的 outpost，Integration 选 “Local Kubernetes Cluster”，由 authentik 在集群里创建。Service 改成内网 NLB 的方法见 [deploy-acs.md 第 6 节](deploy-acs.md#6-启用-ldap-outpost)，端口是 UDP 1812，NLB 要建 UDP 监听，访问控制只放行 VPN 和网络设备的地址。
-- 密码认证只支持 PAP，先确认设备支持。
-- 需要动态码时，员工输入 `密码;123456` 格式（密码后加分号和 6 位动态码）。
-- VPN 和网络设备都要保留本地应急账号，见第 7 节。
-- 参考 [RADIUS 文档](https://docs.goauthentik.io/add-secure-apps/providers/radius/)。
-
-### 6.6 outpost 的通用要求
-
-- 生产环境的 outpost 都由 authentik 在集群里创建，版本随 authentik 自动升级，不要手工部署。
-- outpost 的 token 等同于一个高权限凭据。由 authentik 创建的 outpost，token 自动存在 namespace 的 Secret 里，不要导出。
-- 创建后在管理后台的 Outposts 页面确认状态为健康。
+- 正常情况下，由同步脚本在 10 分钟内自动禁用账号并踢掉 authentik 会话。账号和资料保留用于审计，不自动删除，见 [feishu.md 5.5 节](feishu.md#55-同步的字段)。
+- 各下游系统里已登录的会话不会马上失效。JumpServer、GitLab 等高危系统要缩短会话有效期。
+- 紧急离职（如安全事件）：先在 authentik 里手动禁用，再到 JumpServer、VPN 等高危系统确认会话已断开。
+- 离职人员如果有个人 token（如 GitLab Personal Access Token、Harbor 机器人账号），需要在对应系统里单独吊销。authentik 禁用账号不会让这些 token 失效。
 
 ## 7. 高可用与应急
 
@@ -350,7 +238,7 @@ authentik 或它的数据库不可用时：
 | RTO（恢复时间目标） | 故障后多久必须恢复登录 | 1 小时以内 | server 和 worker 多副本跨可用区，数据库主备自动切换，有恢复操作手册 |
 | RPO（数据恢复点目标） | 最多能接受丢失多久的数据 | 1 小时以内 | 云数据库开启时间点恢复（PITR） |
 
-authentik 里的用户和部门组可以由同步脚本从飞书重建，但手工配置的应用、provider、角色组、权益和 MFA 设备无法重建。这部分配置要靠数据库备份，以及 9.5 节的 blueprint。
+authentik 里的用户和部门组可以由同步脚本从飞书重建，但手工配置的应用、provider、角色组、权益和 MFA 设备无法重建。这部分配置要靠数据库备份，以及写成 blueprint 的配置，见 [authentik-deploy.md 7.5、7.6 节](authentik-deploy.md#75-用-blueprints-管理配置)。
 
 ### 7.3 应急通道
 
@@ -376,99 +264,39 @@ authentik 里的用户和部门组可以由同步脚本从飞书重建，但手�
 
 - 单个 Pod 故障：ALB 健康检查自动摘除，Deployment 自动拉起新 Pod。
 - 数据库故障：确认云数据库主备切换完成，必要时用时间点恢复。
-- 集群或可用区整体故障：在另一个集群用仓库里的 `deployments/`、加密保存的 Secret 内容和 ACR 镜像重新部署（见 deploy-acs.md 第 3、8 节），ALB 指向新集群。
-- 流水线不可用（例如 authentik 故障导致登录不了 Jenkins）：用不依赖 authentik 的应急通道直接执行 helm，见 [deploy-acs.md 第 8 节](deploy-acs.md#8-应急发布通道)。
+- 集群或可用区整体故障：在另一个集群用仓库里的 `deployments/`、加密保存的 Secret 内容和 ACR 镜像重新部署（见 [authentik-deploy.md 第 3、8 节](authentik-deploy.md#3-首次部署前的准备)），ALB 指向新集群。
+- 流水线不可用（例如 authentik 故障导致登录不了 Jenkins）：用不依赖 authentik 的应急通道直接执行 helm，见 [authentik-deploy.md 第 8 节](authentik-deploy.md#8-应急发布通道)。
 - 误操作（例如误删应用或大量误禁用）：用 RDS 的时间点恢复创建一个临时实例，从中导出所需数据，或整体回滚。
 
-## 8. 登录页品牌定制
-
-推荐只用后台的品牌设置，不自己写登录前端：
-
-- **System → Brands**：logo、标题、favicon、默认背景图、自定义 CSS。
-- **Flows → `default-authentication-flow`**：登录页标题（替换 “Welcome to authentik!”）、背景图、布局。
-- 素材放在 OSS 或 CDN 上，在这些设置里填 URL。生产环境不在 Customization → Files 上传文件，原因见第 2 节。logo 用 SVG，去掉四周留白，横版宽高比约 7:1。
-
-自定义 CSS 的注意事项：
-
-- 只改 CSS 变量（`--ak-`、`--pf-` 开头）和 `::part()`。直接按标签名或 class 写的样式，升级后很容易失效。
-- 每次升级前，在本地 Docker 上用新版本检查登录页和用户门户的显示。
-- CSS 写坏导致进不了后台时，用恢复链接登录（会临时禁用自定义 CSS），再去 Brands 里修复。
-
-## 9. 日常运维
-
-### 9.1 备份
-
-- PostgreSQL 每天自动备份，至少保留 30 天，并开启时间点恢复。
-- 每季度演练一次恢复：用备份恢复出一个临时 RDS 实例，确认数据完整（用户、应用、绑定都在），演练后删除。
-- Secret `iam-passport-authentik` 的内容（尤其是 `AUTHENTIK_SECRET_KEY`）单独加密备份到密码管理工具，和数据库备份分开存放。数据库备份没有对应的 secret key 时，部分加密数据无法恢复。
-- 登录页用到的图片在 OSS 上开启版本控制。
-
-### 9.2 升级
-
-- 版本号格式是“年.月”，2026 年起每季度一个版本。只有最近两个版本会收到安全补丁，所以最多落后一个版本。
-- 订阅 authentik 的 [GitHub Security Advisories](https://github.com/goauthentik/authentik/security/advisories) 和版本发布通知，有高危漏洞时尽快打补丁。
-- 数据库迁移不可逆，回滚只能靠恢复备份。升级前必须备份 RDS。
-- 升级后的回归测试至少包括：飞书扫码登录、同步脚本 `--dry-run`、每类接入方式各一个系统（OIDC、代理认证、LDAP、RADIUS）、登录页显示。
-
-操作步骤见 [deploy-acs.md 7.2 节](deploy-acs.md#72-升级-authentik)。
-
-### 9.3 监控和告警
-
-Pod、ALB、RDS、飞书同步的告警规则见 [deploy-acs.md 7.4 节](deploy-acs.md#74-监控和告警)。此外还要关注：
-
-| 监控项 | 方式 |
-|---|---|
-| 证书 | HTTPS 和 LDAPS 证书到期前 30 天告警 |
-| token | 同步脚本和其他服务账号的 token 到期前提醒 |
-| 安全事件 | 管理员登录、应急账号登录、批量禁用、权限变更、登录失败次数异常 |
-
-安全事件可以直接用 authentik 发邮件通知：在 Events → Notification Transports 里建一个 Email 类型的通道，再在 Notification Rules 里绑定要通知的事件，接收组选 `ops-admin`。邮件发送的配置见 [deploy-acs.md 3.8 节](deploy-acs.md#38-邮件发送飞书邮箱)。
-
-### 9.4 离职处理
-
-- 正常情况下，由同步脚本在 10 分钟内自动禁用账号并踢掉 authentik 会话。账号和资料保留用于审计，不自动删除，见 [feishu.md 5.5 节](feishu.md#55-同步的字段)。
-- 各下游系统里已登录的会话不会马上失效。JumpServer、GitLab 等高危系统要缩短会话有效期。
-- 紧急离职（如安全事件）：先在 authentik 里手动禁用，再到 JumpServer、VPN 等高危系统确认会话已断开。
-- 离职人员如果有个人 token（如 GitLab Personal Access Token、Harbor 机器人账号），需要在对应系统里单独吊销。authentik 禁用账号不会让这些 token 失效。
-
-### 9.5 配置管理
-
-在后台手工操作出来的配置，没法追溯谁在什么时候改了什么，出了问题也很难恢复。
-
-- 把飞书 source、属性映射、各个应用和 provider、品牌设置逐步写成 blueprint（authentik 的声明式配置文件），放到 `deployments/chart/blueprints/`，随 Helm chart 发布。写法和本地验证方法见 [deploy-acs.md 7.5 节](deploy-acs.md#75-用-blueprints-管理配置)。
-- 配置变更走代码评审。
-- 暂时还没写成 blueprint 的配置，在后台修改前后要在变更记录里登记。
-- 后台的 Events 页面记录了管理员操作，可以用来核对变更。
-
-## 10. 审计与合规
+## 8. 审计与合规
 
 - **日志保存期限**：等保 2.0 和《网络安全法》要求网络日志至少保存 6 个月。authentik 的事件日志在库里有保存期限，到期会自动清理。要把事件日志转发到公司的日志平台（例如通过事件通知规则推送，或定期调用 API 导出），统一保存至少 6 个月。
 - **需要保留的日志**：登录成功和失败、管理员操作、账号启用和禁用、权限和组变更、应急账号使用记录。同步脚本的日志也要一起保存。
 - **个人信息保护**：authentik 里有员工的姓名、邮箱、部门等个人信息。按《个人信息保护法》的要求，管理员权限只给必要的人，管理员操作要留痕，数据不出境（自建部署，并已关闭错误上报）。
 - **定期复核**：每季度复核管理员、高权限角色组、服务账号和 token，记录复核结果。
 
-## 11. 上线组织与决策
+## 9. 上线组织与决策
 
-### 11.1 技术支持
+### 9.1 技术支持
 
 开源版的功能足够使用，但出了问题只能自己排查或者去社区求助。这套系统决定全公司能不能登录，建议评估 Authentik Security 的企业版订阅，主要买的是技术支持和响应时效，而不是功能。决定不买时，团队里至少要有两个人熟悉 authentik 的部署和排障。
 
-### 11.2 安全测试
+### 9.2 安全测试
 
 authentik 是所有系统的入口。上线前请公司安全团队或外部机构做一次渗透测试，重点包括：登录流程、管理后台的访问控制、对外开放的端口、outpost 的网络隔离。
 
-### 11.3 推广节奏
+### 9.3 推广节奏
 
 1. **试点**：在技术中心试点 1 到 2 周，只接入 Grafana 和 GitLab，收集问题。
 2. **准备**：写好员工使用说明（怎么扫码登录、怎么设置 JumpServer 密码、怎么设置 MFA），明确出问题找谁、多久响应。
 3. **推广**：按部门分批推广，每批之间留出处理问题的时间。
 4. **收尾**：所有系统接入后，关闭各系统的本地登录，清理遗留账号。
 
-## 12. 上线检查清单
+## 10. 上线检查清单
 
 部署：
 
-- [ ] 正式通知员工之前，已在生产环境按本文和 feishu.md 完整走通，第 0 节的待验证项已全部确认
+- [ ] 正式通知员工之前，已在生产环境按本文和 feishu.md 完整走通，本文和 authentik-deploy.md 附录 A 的待验证项已全部确认
 - [ ] server 和 worker 各至少 2 个副本，跨可用区，使用同一个 Secret，没有使用抢占式实例
 - [ ] 使用云数据库，主备跨可用区，已开启自动备份和时间点恢复，并完成一次恢复演练
 - [ ] IAM 使用专用 namespace（最好是独立集群），Jenkins 用 `iam-deployer` 账号发布，Secret 已开启 KMS 加密
@@ -501,7 +329,7 @@ authentik 是所有系统的入口。上线前请公司安全团队或外部机�
 
 - [ ] 已完成 [feishu.md 的上线检查清单](feishu.md#8-上线检查清单)
 
-系统接入：
+系统接入（每个系统的验收见 [integrations.md 3.5 节](integrations.md#35-每个-oidc-系统的验收)）：
 
 - [ ] 每个系统都已完成已有账号的比对，试登录确认关联到原账号
 - [ ] 每个应用都配置了绑定
@@ -515,3 +343,13 @@ authentik 是所有系统的入口。上线前请公司安全团队或外部机�
 - [ ] 已完成渗透测试，高危问题已修复
 - [ ] 已决定是否购买官方支持；不购买时至少两人掌握运维
 - [ ] 员工使用说明和支持渠道已准备好
+
+## 附录 A. 待验证项
+
+本文**尚未在真实环境完整走通**。上线前，先在生产环境（正式通知员工之前）按第 3 到第 7 节和 integrations.md 完整操作一遍，把与实际界面不符的地方改掉，再定稿。
+
+尚待验证的内容：
+
+| 内容 | 状态 | 验证方法 |
+|---|---|---|
+| authentik 的 “Search full LDAP directory” 权限名 | 未核对 | 和 LDAP provider 的权限设置页面对照 |

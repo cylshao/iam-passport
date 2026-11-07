@@ -1,5 +1,5 @@
 # One-time setup, applied by a cluster administrator, never by the
-# pipeline (docs/deploy-acs.md 3.2):
+# pipeline (docs/authentik-deploy.md 3.2):
 #
 #   sed 's/__namespace__/iam-passport-prod/g' deployments/cluster-setup.yaml | kubectl apply -f -
 #
