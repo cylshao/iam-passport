@@ -108,3 +108,7 @@ python3 -m feishu.main --dry-run   # 只打印将要做的变更，不写入
 - 不要提交 `.env`、`authentik/data/` 等文件，`.gitignore` 已排除。
 - 生产环境不要使用本地生成的密钥，要重新生成并加密保存。
 - 恢复链接等同于管理员登录权限，用完即弃，不要发到群里。
+
+## 许可证
+
+[Apache License 2.0](LICENSE)。authentik、GitLab 等依赖各自遵循其许可证，本仓库只使用它们的官方镜像，不包含其源码。
