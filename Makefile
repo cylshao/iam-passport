@@ -18,7 +18,7 @@ HELM := docker run --rm -v "$(CURDIR)/deployments/chart:/chart" -w /chart $(HELM
 
 .DEFAULT_GOAL := lint
 
-.PHONY: lint chart mirror image-feishu-sync up down ldap-up
+.PHONY: lint chart mirror image-feishu-sync up down ldap-up gitlab-up
 
 # TODO values render fine; the pipeline rejects them.
 lint:
@@ -72,3 +72,8 @@ down:
 ldap-up:
 	$(call sync-tag,outposts/ldap)
 	cd outposts/ldap && docker compose up -d
+
+# A local GitLab for trying the OIDC login; see docs/gitlab.md section 8.
+gitlab-up:
+	@test -f apps/gitlab/.env || { echo "apps/gitlab/.env missing: cp apps/gitlab/.env.example apps/gitlab/.env and fill it in"; exit 1; }
+	cd apps/gitlab && docker compose up -d

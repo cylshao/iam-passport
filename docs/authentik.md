@@ -109,7 +109,7 @@ flowchart LR
 安装完成后马上处理。下面多处要求 MFA，MFA 和 TOTP 是什么、员工怎么绑定，见 3.4 节。
 
 1. 给 `akadmin` 开启 MFA，并删除 Secret 里的初始密码，步骤见 [authentik-deploy.md 第 4 节](authentik-deploy.md#4-首次部署)。
-2. 另建一个应急管理员账号，用本地密码加 MFA。用户名不要用常见英文名，避免和员工重名（重名时同步脚本会给员工的用户名加数字，员工容易混淆）。
+2. 另建一个应急管理员账号，用本地密码加 MFA。用户名不要用常见英文名，避免和员工重名（重名时同步脚本会给员工的用户名加数字，员工容易混淆）。`akadmin` 和应急管理员的邮箱用专用地址（如 `akadmin@company.com`），不要用管理员本人的邮箱：GitLab 等系统按邮箱关联账号，邮箱重复会让员工扫码时关联错账号或被拒绝，见 [gitlab.md 第 9 节](gitlab.md#9-常见问题)。
 3. 密码登录的规则由 blueprint `password-login-exceptions.yaml` 配置，随 Helm chart 发布，不要在后台手工修改：
 
    | 账号 | 飞书扫码 | 密码登录 |
@@ -125,7 +125,7 @@ flowchart LR
    这条规则只作用于登录页（`default-authentication-flow`）。飞书扫码走 `default-source-authentication`，不受影响；LDAP、RADIUS 走各自的 bind flow，也不受影响，见 [integrations.md 第 6 节](integrations.md#6-jumpserverldap)。
 4. 在系统设置里关闭“允许用户修改姓名、邮箱、用户名”，资料统一以飞书为准。不关的话，用户改了也会被同步脚本覆盖。
 5. 管理员账号的邮箱和密码要准确记录在公司的密码管理工具里。
-6. 在 System → Settings 里把 Avatars 改成 `attributes.avatar,initials`：有飞书头像（同步脚本写在账号的 `avatar` 属性里）就用飞书头像，没有就显示姓名首字母。不要用默认的 `gravatar`，国内访问慢，还会把邮箱的哈希发给外部服务。通过 OIDC 接入的系统能从 `profile` scope 的 `picture` 拿到头像地址，但 GitLab 不读这个字段，仍显示自己的默认头像。
+6. 在 System → Settings 里把 Avatars 改成 `attributes.avatar,initials`：有飞书头像（同步脚本写在账号的 `avatar` 属性里）就用飞书头像，没有就显示姓名首字母。不要用默认的 `gravatar`，国内访问慢，还会把邮箱的哈希发给外部服务。通过 OIDC 接入的系统能从 `profile` scope 的 `picture` 拿到头像地址，但 GitLab 不读这个字段，要用脚本上传，见 [gitlab.md 第 4 节](gitlab.md#4-头像)。
 7. 配置防止扫码冒用手工账号的策略，并落实飞书账号安全要求，见 [feishu.md 3.5 节和 6.1 节](feishu.md#35-防止扫码冒用手工账号)。
 
 ### 3.1 会话和密码策略
@@ -211,10 +211,11 @@ org-sync/
 ├── feishu/              # 飞书
 ├── dingtalk/            # 钉钉（规划中）
 ├── slack/               # Slack（规划中）
+├── gitlab/              # 反方向：把 authentik 里的头像上传到 GitLab，见 gitlab.md 第 4 节
 └── requirements.txt     # 各来源共用的 Python 依赖
 ```
 
-每个来源的目录里放读取这个来源的代码（如 `feishu/contacts.py`）和入口 `main.py`，在 `org-sync` 目录下用 `python3 -m <来源>.main` 运行。authentik 的读写和重试直接用 `common/` 里的。
+每个来源的目录里放读取这个来源的代码（如 `feishu/contacts.py`）和入口 `main.py`，在 `org-sync` 目录下用 `python3 -m <来源>.main` 运行。authentik 的读写和重试直接用 `common/` 里的。`gitlab/` 不是通讯录来源，是从 authentik 往下游系统补 OIDC 带不过去的数据。
 
 新增来源时遵守以下约定，避免不同来源的脚本互相干扰：
 
