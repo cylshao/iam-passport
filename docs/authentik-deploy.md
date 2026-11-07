@@ -543,7 +543,11 @@ docker compose exec worker ak apply_blueprint local/<文件名>
 
 ## 8. 应急发布通道
 
-Jenkins、GitLab 以后都会接入 authentik 登录。authentik 出故障时，可能登录不了 Jenkins，也就不能通过流水线修复 authentik。所以要准备一条**完全不依赖 authentik** 的通道：
+Jenkins、GitLab 以后都会接入 authentik 登录。authentik 出故障时，可能登录不了 Jenkins，也就不能通过流水线修复 authentik。
+
+第一层是 Jenkins 的应急账号：Jenkins 接入时配置一个用本地密码登录的 `breakglass` 账号，authentik 故障时用它登录 Jenkins，照常运行流水线，见 [jenkins.md 第 5 节](jenkins.md#5-应急账号)。
+
+Jenkins 本身也不可用时，要有一条**完全不依赖 authentik 和 Jenkins** 的通道：
 
 1. 一台堡垒机或运维笔记本，上面装好 helm 和 kubectl，用**阿里云 RAM 账号**获取的 kubeconfig 访问集群，不经过 authentik。
 2. 堡垒机上有本仓库的最新代码。

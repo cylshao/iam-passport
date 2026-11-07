@@ -2,7 +2,7 @@
 
 本文说明各业务系统怎么接入 authentik：接入顺序、已有账号的迁移、OIDC 的配置约定、自研系统，以及代理认证、LDAP、RADIUS 三种兜底方式。各接入方式怎么选见 [authentik.md 第 1 节](authentik.md#1-总体架构)，权限和组的设计见 [authentik.md 第 5 节](authentik.md#5-权限设计)。
 
-具体系统的接入步骤单独成篇：GitLab 见 [gitlab.md](gitlab.md)。文中的 `auth.company.com` 等都是占位地址。
+具体系统的接入步骤单独成篇：GitLab 见 [gitlab.md](gitlab.md)，Jenkins 见 [jenkins.md](jenkins.md)。文中的 `auth.company.com` 等都是占位地址。
 
 ## 1. 接入顺序
 
@@ -102,9 +102,10 @@ Issuer 是 `https://auth.company.com/application/o/<slug>/`，系统支持自动
 - [ ] 系统的本地注册已关闭，本地密码登录已关闭或只留应急管理员
 - [ ] 离职处理已确认：authentik 禁用账号后，系统里已有的会话和个人 token 怎么失效
 
-### 3.6 GitLab、Grafana
+### 3.6 GitLab、Jenkins、Grafana
 
 - **GitLab**：接入步骤、头像、离职处理和常见问题见 [gitlab.md](gitlab.md)。
+- **Jenkins**：按用户名识别账号，账号迁移、权限映射、应急账号和 API token 的处理见 [jenkins.md](jenkins.md)。
 - **Grafana**：通过 Generic OAuth 接入，配置方法见 [authentik 的 Grafana 集成文档](https://integrations.goauthentik.io/monitoring/grafana/)。在此基础上，scope 加上 `entitlements`，在 authentik 的 Grafana 应用里建权益 `Grafana Admins`、`Grafana Editors`，分别绑定 `ops-admin`、`dev-lead`，角色映射：
 
   ```ini

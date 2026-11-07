@@ -18,7 +18,7 @@ HELM := docker run --rm -v "$(CURDIR)/deployments/chart:/chart" -w /chart $(HELM
 
 .DEFAULT_GOAL := lint
 
-.PHONY: lint chart mirror image-feishu-sync up down ldap-up gitlab-up
+.PHONY: lint chart mirror image-feishu-sync up down ldap-up gitlab-up jenkins-up
 
 # TODO values render fine; the pipeline rejects them.
 lint:
@@ -77,3 +77,8 @@ ldap-up:
 gitlab-up:
 	@test -f apps/gitlab/.env || { echo "apps/gitlab/.env missing: cp apps/gitlab/.env.example apps/gitlab/.env and fill it in"; exit 1; }
 	cd apps/gitlab && docker compose up -d
+
+# A local Jenkins for trying the OIDC login, role mapping and escape hatch; see docs/jenkins.md section 8.
+jenkins-up:
+	@test -f apps/jenkins/.env || { echo "apps/jenkins/.env missing: cp apps/jenkins/.env.example apps/jenkins/.env and fill it in"; exit 1; }
+	cd apps/jenkins && docker compose up -d --build

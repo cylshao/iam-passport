@@ -1,0 +1,37 @@
+# 本地验证用的 Jenkins（http://localhost:8931），通过 OIDC 接入本地 authentik。
+# 只用于验证单点登录、权限映射和应急账号，不要用于生产。步骤见 docs/jenkins.md 第 8 节。
+#
+# authentik 按请求的地址生成 issuer，浏览器和 Jenkins 服务端必须用同一个地址访问它。
+# 和 apps/sample-app 一样，jenkins 共用 authentik-proxy 的网络，由它把容器内的
+# localhost:9000 转发到宿主机的 authentik，所以 casc.yaml 能和生产一样用自动发现。
+services:
+  authentik-proxy:
+    image: alpine/socat:1.8.0.3
+    command: TCP-LISTEN:9000,bind=127.0.0.1,fork,reuseaddr TCP:host.docker.internal:9000
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      # jenkins 共用这个容器的网络，端口要发布在这里
+      - 127.0.0.1:8931:8931
+    restart: unless-stopped
+
+  jenkins:
+    build: .
+    network_mode: service:authentik-proxy
+    depends_on:
+      - authentik-proxy
+    environment:
+      JENKINS_OPTS: --httpPort=8931
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false
+      CASC_JENKINS_CONFIG: /casc/casc.yaml
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?OIDC_CLIENT_ID required}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET required}
+      ESCAPE_HATCH_PASSWORD: ${ESCAPE_HATCH_PASSWORD:?ESCAPE_HATCH_PASSWORD required}
+      TZ: Asia/Shanghai
+    volumes:
+      - ./casc.yaml:/casc/casc.yaml:ro
+      - jenkins-home:/var/jenkins_home
+    restart: unless-stopped
+
+volumes:
+  jenkins-home:

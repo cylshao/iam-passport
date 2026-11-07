@@ -1,0 +1,44 @@
+# Jenkins 的 OIDC 登录和权限，启动时由 Configuration as Code 插件加载。
+# 写法和生产相同，只有地址不同，见 docs/jenkins.md 第 3、8 节。
+jenkins:
+  securityRealm:
+    oic:
+      clientId: "${OIDC_CLIENT_ID}"
+      clientSecret: "${OIDC_CLIENT_SECRET}"
+      serverConfiguration:
+        wellKnown:
+          wellKnownOpenIDConfigurationUrl: "http://localhost:9000/application/o/jenkins/.well-known/openid-configuration"
+          scopesOverride: "openid profile email entitlements offline_access"
+      # Jenkins 的权限和构建记录都按用户名记录，要和原来的本地用户名一致
+      userNameField: "preferred_username"
+      fullNameFieldName: "name"
+      emailFieldName: "email"
+      # 只认 authentik 里这个应用的权益，不把员工的全部部门组带进来
+      groupsFieldName: "entitlements"
+      logoutFromOpenidProvider: true
+      postLogoutRedirectUrl: "http://localhost:8931/"
+      properties:
+        - "pkce"
+        - escapeHatch:
+            username: "breakglass"
+            secret: "${ESCAPE_HATCH_PASSWORD}"
+            group: "breakglass"
+  authorizationStrategy:
+    globalMatrix:
+      entries:
+        - group:
+            name: "Jenkins Admins"
+            permissions:
+              - "Overall/Administer"
+        - group:
+            name: "breakglass"
+            permissions:
+              - "Overall/Administer"
+        - group:
+            name: "authenticated"
+            permissions:
+              - "Overall/Read"
+              - "Job/Read"
+unclassified:
+  location:
+    url: "http://localhost:8931/"

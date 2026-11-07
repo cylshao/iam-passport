@@ -317,7 +317,7 @@ authentik 里的用户和部门组可以由同步脚本从飞书重建，但手�
 - 单个 Pod 故障：ALB 健康检查自动摘除，Deployment 自动拉起新 Pod。
 - 数据库故障：确认云数据库主备切换完成，必要时用时间点恢复。
 - 集群或可用区整体故障：在另一个集群用仓库里的 `deployments/`、加密保存的 Secret 内容和 ACR 镜像重新部署（见 [authentik-deploy.md 第 3、8 节](authentik-deploy.md#3-首次部署前的准备)），ALB 指向新集群。
-- 流水线不可用（例如 authentik 故障导致登录不了 Jenkins）：用不依赖 authentik 的应急通道直接执行 helm，见 [authentik-deploy.md 第 8 节](authentik-deploy.md#8-应急发布通道)。
+- 流水线不可用（例如 authentik 故障导致登录不了 Jenkins）：先用 Jenkins 的应急账号登录运行流水线，见 [jenkins.md 第 5 节](jenkins.md#5-应急账号)；Jenkins 也不可用时，用不依赖 authentik 的应急通道直接执行 helm，见 [authentik-deploy.md 第 8 节](authentik-deploy.md#8-应急发布通道)。
 - 误操作（例如误删应用或大量误禁用）：用 RDS 的时间点恢复创建一个临时实例，从中导出所需数据，或整体回滚。
 
 ## 8. 审计与合规

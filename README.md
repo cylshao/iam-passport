@@ -32,13 +32,14 @@ flowchart LR
 
 ```text
 iam-passport/
-├── Makefile            # make lint / chart / mirror / image-feishu-sync / gitlab-up
+├── Makefile            # make lint / chart / mirror / image-feishu-sync / gitlab-up / jenkins-up
 ├── deployments/        # 生产部署：Helm chart、Jenkinsfile、集群初始化、Dockerfile、authentik 版本号
 ├── authentik/          # 本地验证用的 compose 文件和 .env 模板
 ├── outposts/           # 本地验证用的 outpost 部署文件
 │   └── ldap/           # LDAP outpost（给 JumpServer 等只支持 LDAP 的系统用）
 ├── apps/               # 本地验证用的业务系统
-│   └── gitlab/         # 已按 OIDC 接好本地 authentik 的 GitLab CE
+│   ├── gitlab/         # 已按 OIDC 接好本地 authentik 的 GitLab CE
+│   └── jenkins/        # 已按 OIDC 接好本地 authentik 的 Jenkins，含权限映射和应急账号
 ├── org-sync/           # 组织架构同步，每个来源一个子目录
 │   ├── common/         # 各来源共用：authentik 客户端、带重试的 HTTP 请求
 │   ├── feishu/         # 飞书通讯录 -> authentik
@@ -48,7 +49,8 @@ iam-passport/
     ├── authentik-deploy.md # 部署与运维：在阿里云 Kubernetes 上部署、发布、升级、监控、备份
     ├── integrations.md # 系统接入：账号迁移、OIDC 配置约定、自研系统、LDAP、RADIUS
     ├── feishu.md       # 飞书扫码登录和通讯录同步
-    └── gitlab.md       # GitLab 接入：配置、头像、离职处理、本地验证
+    ├── gitlab.md       # GitLab 接入：配置、头像、离职处理、本地验证
+    └── jenkins.md      # Jenkins 接入：账号迁移、权限、应急账号、API token、本地验证
 ```
 
 ## 本地快速体验
@@ -105,7 +107,7 @@ python3 -m feishu.main --dry-run   # 只打印将要做的变更，不写入
 | 评审方案、决定能不能上线 | [authentik.md](docs/authentik.md) 第 1、7 节和第 10 节的检查清单 | [feishu.md](docs/feishu.md) 第 6 节的风险 |
 | 搭建和运维生产环境 | [authentik-deploy.md](docs/authentik-deploy.md) 开头的搭建顺序 | [authentik.md](docs/authentik.md) 第 3 节的安全加固 |
 | 配置飞书扫码和通讯录同步 | [feishu.md](docs/feishu.md) | |
-| 把 GitLab、Jenkins 等系统接入 authentik | [integrations.md](docs/integrations.md) 第 1 到 3 节 | [gitlab.md](docs/gitlab.md) |
+| 把 GitLab、Jenkins 等系统接入 authentik | [integrations.md](docs/integrations.md) 第 1 到 3 节 | [gitlab.md](docs/gitlab.md)、[jenkins.md](docs/jenkins.md) |
 
 OIDC 的原理（授权码流程、令牌、scope）不在这里重复，见博客 [authentik 统一身份认证 · OIDC](https://cylshao.com/posts/authentik-oidc/)。
 
@@ -116,6 +118,7 @@ OIDC 的原理（授权码流程、令牌、scope）不在这里重复，见博�
 - [docs/integrations.md](docs/integrations.md)：系统接入。接入顺序、已有账号的迁移、OIDC 的配置约定和验收、Grafana、自研系统、代理认证、LDAP、RADIUS。
 - [docs/feishu.md](docs/feishu.md)：飞书扫码登录和通讯录同步的配置、风险和上线检查清单。
 - [docs/gitlab.md](docs/gitlab.md)：GitLab 通过 OIDC 接入。接入前准备、配置、飞书头像上传、离职处理、本地验证和常见问题。
+- [docs/jenkins.md](docs/jenkins.md)：Jenkins 通过 OIDC 接入。按用户名迁移老账号、按权益映射权限、应急账号、API token 的续期和离职失效、本地验证和常见问题。
 
 ## 当前状态
 
@@ -123,6 +126,7 @@ OIDC 的原理（授权码流程、令牌、scope）不在这里重复，见博�
 - 飞书扫码登录和通讯录同步已在本地 authentik 上用真实飞书租户验证。同步脚本没有自动化测试，修改后先在本地用 `--dry-run` 对照真实通讯录检查输出。
 - 本地验证用的 LDAP outpost 部署文件已编写，配置校验通过，但还没有连接 authentik 实际运行过。
 - Helm chart 已通过 `helm lint` 和 Kubernetes 1.31 的 schema 校验，还没有在集群上部署过；集群、数据库、域名、GitLab 地址等还是占位项，上线前要替换的完整清单见 [docs/authentik-deploy.md 3.1 节](docs/authentik-deploy.md#31-上线前需要替换的占位项)。
+- 本地 Jenkins（`apps/jenkins/`）已在本地 authentik 上验证跳转登录、权限映射、老账号迁移、API token 续期和禁用后失效、应急账号和退出，见 [docs/jenkins.md 第 8 节](docs/jenkins.md#8-本地验证)。
 - 第一个 blueprint（只允许同步的账号扫码登录）已在本地 authentik 上验证。Grafana 试点配置尚未编写。
 
 ## 安全提示
