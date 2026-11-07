@@ -41,15 +41,27 @@ flowchart LR
     AK -->|RADIUS| VPN("<div style='width:19em'>VPN、网络设备</div>")
 ```
 
-接入方式的选择原则：
+接入方式的对比：
 
-| 系统类型 | 接入方式 | 说明 |
-|---|---|---|
-| 支持 OIDC 或 SAML 的系统 | 单点登录 | 首选。系统拿不到用户密码，统一走 MFA |
-| 没有自带登录的页面 | Proxy provider 代理认证 | 如 Prometheus、Alertmanager |
-| 只支持 LDAP 的系统 | LDAP outpost | 如 JumpServer。用户需要单独设置 authentik 密码 |
-| VPN、网络设备 | RADIUS outpost | 密码认证只支持 PAP |
-| 服务器、数据库 | 通过 JumpServer 登录 | 不给个人开服务器账号 |
+| 方式 | 员工怎么登录 | 能飞书扫码 | authentik 的二次 MFA | 系统能拿到员工密码 | 额外组件 | 典型系统 |
+|---|---|---|---|---|---|---|
+| OIDC | 浏览器跳到 authentik 登录后跳回 | 能 | 能 | 不能 | 无 | GitLab、Grafana、Jenkins、Harbor、Argo CD、自研系统 |
+| SAML | 同 OIDC | 能 | 能 | 不能 | 无 | 只支持 SAML 的商业软件 |
+| 代理认证（Proxy provider） | 访问系统时先被拦到 authentik 登录 | 能 | 能 | 不能 | 反向代理加 outpost（可用内置的） | Prometheus、Alertmanager 等没有登录功能的页面。只能控制能否访问，系统里不区分角色 |
+| LDAP | 在系统的登录框里输入用户名和 authentik 密码 | 不能 | 不能，靠系统自己的 MFA | 能 | LDAP outpost | 只支持 LDAP 的老系统，如部分版本的 JumpServer |
+| RADIUS | 在客户端输入用户名和密码，需要动态码时拼在密码后 | 不能 | 只能用拼接的动态码 | 能 | RADIUS outpost | VPN、交换机等网络设备。密码认证只支持 PAP |
+
+服务器和数据库不直接接入，统一通过 JumpServer 登录，不给个人开服务器账号。
+
+按下面的顺序，选系统支持的第一种：
+
+1. **OIDC**：首选，见 [integrations.md 第 3 节](integrations.md#3-oidc)。
+2. **SAML**：系统只支持 SAML 时。两者都支持时选 OIDC，配置和排查更简单。
+3. **代理认证**：系统没有登录功能，且不需要区分角色，见 [integrations.md 第 5 节](integrations.md#5-代理认证prometheusalertmanager)。
+4. **LDAP**：系统只支持 LDAP 时，见 [integrations.md 第 6 节](integrations.md#6-jumpserverldap)。
+5. **RADIUS**：只用于 VPN 和网络设备，见 [integrations.md 第 7 节](integrations.md#7-vpn-和网络设备radius)。
+
+越往后，飞书扫码和 authentik 的 MFA 越用不上，员工也越需要单独的密码。用 LDAP 或 RADIUS 的员工，要先扫码登录 authentik，在个人设置里设置密码；这个密码只能用于 LDAP 和 RADIUS，在 authentik 登录页用密码登录仍会被拒绝，除非在 `密码登录例外` 组里，见第 3 节。
 
 **authentik 是全公司所有系统的登录入口。** 它一旦不可用，所有人都登录不了任何系统，包括要去修复它的运维人员。第 7 节专门说明高可用和应急通道，上线前必须落实。
 
@@ -94,7 +106,7 @@ flowchart LR
 
 ## 3. 安装后的安全加固
 
-安装完成后马上处理：
+安装完成后马上处理。下面多处要求 MFA，MFA 和 TOTP 是什么、员工怎么绑定，见 3.4 节。
 
 1. 给 `akadmin` 开启 MFA，并删除 Secret 里的初始密码，步骤见 [authentik-deploy.md 第 4 节](authentik-deploy.md#4-首次部署)。
 2. 另建一个应急管理员账号，用本地密码加 MFA。用户名不要用常见英文名，避免和员工重名（重名时同步脚本会给员工的用户名加数字，员工容易混淆）。
@@ -142,6 +154,45 @@ kubectl -n iam-passport-prod exec deploy/authentik-worker -- ak create_recovery_
 - 链接只能用一次。用过之后再打开会显示 Not Found，这是正常的。
 - 复制时要复制完整。有些工具会把长链接显示成中间带省略号的样子，复制出来的链接就不能用。
 
+### 3.4 MFA 和 TOTP
+
+**MFA**（Multi-Factor Authentication，多因素认证）指登录时除了“知道的东西”（密码），还要再提供“拥有的东西”（手机上的验证器 App、硬件安全密钥）或“本人的特征”（指纹、面容）。密码被猜中或泄露后，攻击者没有第二个因素，仍然登录不了。
+
+员工的飞书扫码本身依赖一部已登录飞书的手机，再加上飞书自己的登录二次验证（[feishu.md 6.1 节](feishu.md#61-飞书账号安全)），已经不只是一个密码。authentik 的 MFA 是在这之上的另一层，防的是飞书账号被盗、或者密码泄露。
+
+authentik 支持的 MFA 方式：
+
+| 方式 | 员工怎么用 | 优点 | 缺点 | 本工程的用法 |
+|---|---|---|---|---|
+| TOTP（动态码） | 手机验证器 App 每 30 秒生成一个 6 位数，登录时输入 | 免费，任何手机都能用，不需要网络 | 钓鱼网站可以骗走并实时转发动态码；换手机要重新绑定 | 默认方式，没有设备的人会被要求当场绑定 |
+| WebAuthn（安全密钥、通行密钥） | 插入 YubiKey 这类硬件密钥，或用电脑、手机自带的指纹和面容 | 最安全：密钥和网址绑定，钓鱼网站拿不到；不用输入数字 | 需要设备支持；硬件密钥要采购，丢了要有备用 | 推荐给管理员和高危系统的使用者 |
+| 静态恢复码 | 一组一次性的备用码，每个只能用一次 | 手机丢失时还能登录 | 要妥善保存，泄露等同于丢了第二个因素 | 管理员和应急账号必须生成，保存在公司的密码管理工具里 |
+| 短信、Duo 等 | | | 短信需要短信网关，且可能被劫持；Duo 是收费服务 | 不使用 |
+
+**TOTP 的原理**（Time-based One-Time Password，基于时间的一次性密码）：绑定时，authentik 显示一个二维码，里面是一段随机密钥，员工用验证器 App 扫码保存。之后 App 和 authentik 各自用这段密钥加上当前时间，算出同一个 6 位数，每 30 秒换一次。所以：
+
+- 动态码在手机本地生成，手机不联网也能用。
+- 两边的时间要准。authentik 会容忍前后少量偏差，但服务器时间错了几分钟，所有人的动态码都会校验失败，见 3.1 节的时间同步。
+- 那段密钥就是第二个因素本身。二维码不要截图转发，换手机时在新手机上重新绑定，而不是转移截图。
+- 常用的验证器 App：Microsoft Authenticator、Google Authenticator，或者公司的密码管理工具自带的验证器。
+
+**哪里要求 MFA**：
+
+| 场景 | 要求 | 配置 |
+|---|---|---|
+| 在 authentik 登录页用密码登录（例外组的员工、`akadmin`、应急管理员） | 必须过 MFA；还没有设备的人当场绑定 TOTP | blueprint `password-login-exceptions.yaml`，见第 3 节开头的第 3 条 |
+| 员工飞书扫码登录 | 普通员工不需要，扫码即可 | |
+| 打开高危应用（JumpServer、Argo CD、各系统的管理后台） | 扫码后再过一次 MFA，几小时内不重复要求 | 5.1 节 |
+| authentik 管理员扫码登录 | 扫码后再过一次 MFA | 5.1 节 |
+| LDAP、RADIUS 接入的系统 | authentik 的 MFA 用不上：JumpServer 开启它自己的 MFA；VPN 把动态码拼在密码后面 | [integrations.md 第 6、7 节](integrations.md#6-jumpserverldap) |
+
+**员工自己绑定**：登录 authentik 的用户界面，进入 Settings → MFA Devices → Enroll，选 TOTP，用验证器 App 扫码，输入 App 上显示的 6 位数确认。需要 MFA 而还没绑定时，登录流程也会直接引导绑定。
+
+**换手机或丢失手机**：
+
+- 有恢复码时，用恢复码登录，删除旧设备，绑定新手机。
+- 没有恢复码时，由 authentik 管理员在 Directory → Users 里打开这个员工，在 MFA Authenticators 标签页删除他的设备，员工下次登录时重新绑定。删除前要通过电话或当面确认是本人，防止有人冒充员工骗管理员重置。
+
 ## 4. 人员来源
 
 authentik 里的员工账号和部门组由同步脚本从通讯录维护，员工通过对应的扫码或单点登录方式登录。
@@ -188,7 +239,7 @@ org-sync/
 
 ### 5.1 高危应用要求二次 MFA
 
-员工扫码登录只依赖飞书账号的安全。对于 JumpServer、生产环境的 Argo CD、各系统的管理后台这类高危应用，要求员工在扫码之后再通过一次 authentik 自己的 MFA（TOTP 或 WebAuthn 安全密钥），即使飞书账号被盗也进不去。
+员工扫码登录只依赖飞书账号的安全。对于 JumpServer、生产环境的 Argo CD、各系统的管理后台这类高危应用，要求员工在扫码之后再通过一次 authentik 自己的 MFA（TOTP 或 WebAuthn 安全密钥，介绍见 3.4 节），即使飞书账号被盗也进不去。
 
 **OIDC、SAML 接入的高危应用**：
 
