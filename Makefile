@@ -18,7 +18,7 @@ HELM := docker run --rm -v "$(CURDIR)/deployments/chart:/chart" -w /chart $(HELM
 
 .DEFAULT_GOAL := lint
 
-.PHONY: lint chart mirror image-feishu-sync up down ldap-up gitlab-up jenkins-up
+.PHONY: lint chart mirror image-feishu-sync up down ldap-up gitlab-up jenkins-up sample-app-up
 
 # TODO values render fine; the pipeline rejects them.
 lint:
@@ -82,3 +82,8 @@ gitlab-up:
 jenkins-up:
 	@test -f apps/jenkins/.env || { echo "apps/jenkins/.env missing: cp apps/jenkins/.env.example apps/jenkins/.env and fill it in"; exit 1; }
 	cd apps/jenkins && docker compose up -d --build
+
+# A sample in-house system with its own login page, signing in through OIDC; see docs/integrations.md section 4.2.
+sample-app-up:
+	@test -f apps/sample-app/.env || { echo "apps/sample-app/.env missing: cp apps/sample-app/.env.example apps/sample-app/.env and fill it in"; exit 1; }
+	cd apps/sample-app && docker compose up -d --build

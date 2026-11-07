@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · 示例自研系统</title>
+  <style>
+    :root { --fg: #27272a; --muted: #71717a; --line: #e4e4e7; --bg: #f4f4f5; --brand: #3370ff; --brand-dark: #245bdb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--fg); background: var(--bg); }
+    a { color: var(--brand); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--fg); font-size: 14px; text-decoration: none; cursor: pointer; }
+    .btn:hover { border-color: #d4d4d8; background: #fafafa; }
+    .btn-primary { border-color: var(--brand); background: var(--brand); color: #fff; }
+    .btn-primary:hover { border-color: var(--brand-dark); background: var(--brand-dark); }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+    .muted { color: var(--muted); }
+    .error { margin-bottom: 16px; padding: 10px 12px; border-radius: 8px; background: #fef2f2; color: #b91c1c; }
+    {% block style %}{% endblock %}
+  </style>
+</head>
+<body>
+{% block body %}{% endblock %}
+</body>
+</html>

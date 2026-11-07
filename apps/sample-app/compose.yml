@@ -1,0 +1,36 @@
+# 本地验证用的示例自研系统（http://localhost:8930），通过 OIDC 接入本地 authentik。
+# 演示自研系统怎么接 authentik，不要用于生产。步骤见 docs/integrations.md 4.2 节。
+#
+# authentik 按请求的地址生成 issuer，浏览器和系统服务端必须用同一个地址访问它。
+# 容器里的 localhost 是容器自己，所以 sample-app 共用 authentik-proxy 的网络，由它把
+# 容器内的 localhost:9000 转发到宿主机的 authentik。这样服务端和浏览器都用
+# http://localhost:9000，系统的代码和配置与生产一样，不需要像 apps/gitlab 那样逐个写地址。
+services:
+  authentik-proxy:
+    image: alpine/socat:1.8.0.3
+    command: TCP-LISTEN:9000,bind=127.0.0.1,fork,reuseaddr TCP:host.docker.internal:9000
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      # sample-app 共用这个容器的网络，端口要发布在这里
+      - 127.0.0.1:8930:8930
+    restart: unless-stopped
+
+  sample-app:
+    build: .
+    network_mode: service:authentik-proxy
+    depends_on:
+      - authentik-proxy
+    environment:
+      OIDC_ISSUER: http://localhost:9000/application/o/sample-app/
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?OIDC_CLIENT_ID required}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET required}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY required}
+      APP_BASE_URL: http://localhost:8930
+      TZ: Asia/Shanghai
+    volumes:
+      - sample-app-data:/data
+    restart: unless-stopped
+
+volumes:
+  sample-app-data:

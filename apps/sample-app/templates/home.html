@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}首页{% endblock %}
+{% block style %}
+    header { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; background: #fff; border-bottom: 1px solid var(--line); }
+    header strong { font-size: 16px; }
+    header form { display: inline; }
+    header .btn { height: 32px; padding: 0 12px; margin-left: 8px; }
+    main { max-width: 880px; margin: 24px auto; padding: 0 24px; }
+    .card { padding: 20px 24px; margin-bottom: 16px; }
+    h2 { margin: 0 0 12px; font-size: 15px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 0; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { width: 140px; font-weight: normal; color: var(--muted); }
+    tr:first-child th, tr:first-child td { border-top: none; }
+    code, pre { font: 12px/1.5 ui-monospace, Menlo, monospace; }
+    pre { margin: 12px 0 0; padding: 12px; overflow: auto; background: var(--bg); border-radius: 8px; }
+    .tag { display: inline-block; margin: 0 6px 6px 0; padding: 0 8px; border-radius: 4px; background: var(--bg); }
+    .tag-admin { background: #e1eaff; color: var(--brand-dark); }
+{% endblock %}
+{% block body %}
+<header>
+  <strong>示例自研系统</strong>
+  <div>
+    <span class="muted">{{ user.name }}</span>
+    <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn">退出</button></form>
+    <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="sso" value="1"><button class="btn" title="同时退出统一身份平台，下次登录要重新扫码">退出并注销公司账号</button></form>
+  </div>
+</header>
+<main>
+  <section class="card">
+    <h2>本系统里的账号</h2>
+    <table>
+      <tr><th>用户名</th><td>{{ user.username }}</td></tr>
+      <tr><th>姓名</th><td>{{ user.name }}</td></tr>
+      <tr><th>邮箱</th><td>{{ user.email or "（authentik 里没有邮箱）" }}</td></tr>
+      <tr><th>角色</th><td>
+        {% if is_admin %}<span class="tag tag-admin">管理员</span>
+        {% else %}<span class="tag">普通用户</span>
+        <span class="muted">有权益 <code>{{ admin_entitlement }}</code> 时为管理员</span>{% endif %}
+      </td></tr>
+      <tr><th>本次登录方式</th><td>{{ method }}</td></tr>
+      <tr><th>关联标识 sub</th><td><code>{{ user.sub }}</code></td></tr>
+      <tr><th>首次登录</th><td>{{ user.created_at | int | datetime }}</td></tr>
+      <tr><th>本次登录</th><td>{{ user.last_login_at | int | datetime }}</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>权益 entitlements</h2>
+    {% for e in entitlements %}<span class="tag">{{ e }}</span>{% else %}<span class="muted">无</span>{% endfor %}
+  </section>
+
+  <section class="card">
+    <h2>所在的组 groups</h2>
+    {% for gr in groups %}<span class="tag">{{ gr }}</span>{% else %}<span class="muted">无</span>{% endfor %}
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>ID Token 里的全部字段</summary>
+      <pre>{{ claims }}</pre>
+    </details>
+  </section>
+</main>
+{% endblock %}

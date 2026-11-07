@@ -2,7 +2,7 @@
 
 本文说明各业务系统怎么接入 authentik：接入顺序、已有账号的迁移、OIDC 的配置约定、自研系统，以及代理认证、LDAP、RADIUS 三种兜底方式。各接入方式怎么选见 [authentik.md 第 1 节](authentik.md#1-总体架构)，权限和组的设计见 [authentik.md 第 5 节](authentik.md#5-权限设计)。
 
-具体系统的接入步骤单独成篇：GitLab 见 [gitlab.md](gitlab.md)，Jenkins 见 [jenkins.md](jenkins.md)。文中的 `auth.company.com` 等都是占位地址。
+具体系统的接入步骤单独成篇：GitLab 见 [gitlab.md](gitlab.md)，Jenkins 见 [jenkins.md](jenkins.md)，发给自研系统开发者的对接文档见 [inhouse.md](inhouse.md)。文中的 `auth.company.com` 等都是占位地址。
 
 ## 1. 接入顺序
 
@@ -118,7 +118,11 @@ Issuer 是 `https://auth.company.com/application/o/<slug>/`，系统支持自动
 
 ## 4. 自研系统
 
-按 3.1 节建 provider 和应用，和通用配置不同的地方：
+### 4.1 authentik 配置
+
+[inhouse.md](inhouse.md) 是发给自研系统开发者的对接文档，开发者只拿到这一份，不能引用仓库里的其他文件。修改它时，所有内容都要在文档内讲清楚，需要 authentik 配置的地方写成“请 IAM 管理员……”。
+
+开发者按 inhouse.md 第 1 节提交申请。按 3.1 节建 provider 和应用，和通用配置不同的地方：
 
 | 项 | 值 |
 |---|---|
@@ -138,6 +142,41 @@ Issuer 是 `https://auth.company.com/application/o/<slug>/`，系统支持自动
 - 确认系统服务器的网段在 `AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS` 里，authentik 才会采用系统转来的 `X-Forwarded-For`。
 
 上线前按 3.5 节验收。
+
+### 4.2 示例系统
+
+`apps/sample-app/` 是按 inhouse.md 实现的示例系统（Python + Flask），用来验证文档的写法在本地 authentik 上走得通。改动 inhouse.md 的流程时，先在示例上验证。
+
+| inhouse.md | `app.py` 里的函数 |
+|---|---|
+| 第 3 节扫码登录 | `auth_login()`、`new_authorization()`、`auth_callback()`、`exchange_code()`、`upsert_user()` |
+| 第 5 节退出 | `logout()` |
+| 第 6 节停用账号 | `current_user()` |
+| 第 7 节账号密码登录 | `password_login()`、`password_login_mfa()`、`advance_flow()`、`finish_password_login()`、`first_error()`、`authentik_client()` |
+
+运行：
+
+1. 按 [README](../README.md#本地快速体验) 在本机启动 authentik（<http://localhost:9000>）。
+2. 在本地 authentik 里按 4.1 节建 provider 和应用，Slug 填 `sample-app`，Redirect URIs 填 `http://localhost:8930/auth/callback`（Authorization）和 `http://localhost:8930/login`（Logout）；建权益 `Sample App Admins`。
+3. `cp apps/sample-app/.env.example apps/sample-app/.env`，填入 Client ID、Client Secret 和会话密钥，然后在仓库根目录 `make sample-app-up`。
+4. 用无痕窗口打开 <http://localhost:8930>，点“公司账号（飞书扫码）”，或者用设置了 TOTP 的例外账号输入账号密码。
+
+authentik 按请求的地址生成 Issuer，示例的服务端和浏览器必须用同一个地址访问 authentik。容器里的 `localhost` 是容器自己，改用 `host.docker.internal:9000` 的话 Issuer 和浏览器那边不一致，自动发现和退出都会出错。所以 `apps/sample-app/compose.yml` 加了一个转发容器，把容器里的 `localhost:9000` 转发到宿主机。
+
+本地的验证结果。验证用的是设置了 TOTP 的本地密码账号，没有用飞书扫码；跳转方式下两者只是在 authentik 里的认证方式不同，系统这边的流程一样：
+
+| 验证项 | 结果 |
+|---|---|
+| 跳转登录 | 在 authentik 认证后回到系统，系统按 `sub` 自动建号，用户名、姓名、邮箱和组与 authentik 一致 |
+| 账号密码 + 动态码登录 | 登录成功，建号结果和跳转登录相同；登录后 authentik 里没有遗留这个账号的会话 |
+| 密码错误、账号不存在 | 都提示“账号或密码不正确” |
+| 动态码错误 | 提示动态码不正确，可以重新输入 |
+| 飞书同步的员工账号输入密码 | 被拒绝，提示“员工账号请用飞书扫码登录” |
+| 没有设置 MFA 的账号输入密码 | 提示改用公司账号登录 |
+| 角色 | 有 `Sample App Admins` 权益的账号显示为管理员 |
+| 部门授权 | 账号移出应用绑定的组后，跳转登录时 authentik 显示 Permission denied；账号密码登录时系统提示没有权限 |
+| 退出并注销公司账号 | 回到系统的登录页，再次登录要重新认证 |
+| Invalidation flow 用默认的 `default-provider-invalidation-flow` | 能回到系统的登录页，但 authentik 的会话还在，再次登录直接进入 |
 
 ## 5. 代理认证：Prometheus、Alertmanager
 
